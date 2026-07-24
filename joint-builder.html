@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Joint Builder — AVC Welding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#1B2A4A;
+    --navy-deep:#0F1D36;
+    --red:#B31B1B;
+    --paper:#F5F6F8;
+    --ink:#1B2A4A;
+    --steel:#5A6B85;
+    --steel-light:#CBD5DC;
+    --control-border:#707B8F;
+    --blueprint:#12324F;
+    --focus:#3A7BD5;
+    --radius:6px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+  }
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible{
+    outline:3px solid var(--focus); outline-offset:2px;
+  }
+
+  .app-header{
+    background:var(--navy); color:white; padding:14px 22px;
+    display:flex; align-items:center; gap:14px;
+    border-bottom:4px solid var(--red);
+  }
+  .header-titles{display:flex; flex-direction:column; line-height:1.15;}
+  .header-eyebrow{font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; color:#C9D2E0; text-transform:uppercase;}
+  .header-title{font-family:'IBM Plex Sans Condensed', sans-serif; font-weight:700; font-size:20px;}
+
+  .layout{
+    display:grid;
+    grid-template-columns:380px 1fr;
+    min-height:calc(100vh - 64px);
+  }
+  @media (max-width:960px){ .layout{grid-template-columns:1fr;} }
+
+  .sidebar{
+    background:white;
+    border-right:1px solid var(--steel-light);
+    padding:18px;
+    overflow-y:auto;
+  }
+  .main{
+    padding:22px;
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    align-items:center;
+  }
+
+  fieldset{border:1.5px solid var(--steel-light); border-radius:8px; padding:14px; margin:0 0 16px 0;}
+  legend{
+    font-family:'IBM Plex Sans Condensed', sans-serif;
+    font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.06em;
+    color:var(--navy); padding:0 6px;
+  }
+  .field-group{margin-bottom:12px;}
+  .field-group label{
+    display:flex; justify-content:space-between;
+    font-size:13px; font-weight:500; color:var(--ink); margin-bottom:5px;
+  }
+  .field-group .field-value{font-family:'IBM Plex Mono', monospace; color:var(--red); font-weight:600;}
+  select, input[type="text"], input[type="number"]{
+    width:100%; padding:8px 9px;
+    border:1.5px solid var(--control-border); border-radius:5px;
+    font-family:'IBM Plex Sans', sans-serif; font-size:13.5px;
+    background:white; color:var(--ink);
+  }
+  input[type="range"]{width:100%; accent-color:var(--red);}
+  .field-hint{font-size:11.5px; color:var(--steel); margin-top:3px; line-height:1.4;}
+
+  .member-tabs{display:flex; gap:6px; margin-bottom:14px;}
+  .member-tabs button{
+    flex:1; padding:9px 6px; border-radius:6px;
+    border:1.5px solid var(--control-border); background:white; color:var(--steel);
+    font-family:'IBM Plex Sans', sans-serif; font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .member-tabs button.active{background:var(--navy); color:white; border-color:var(--navy);}
+  .member-tabs button:not(.active):hover{background:var(--paper);}
+
+  .joint-type-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+  }
+  .joint-type-grid button{
+    border:1.5px solid var(--control-border); background:white; border-radius:6px;
+    padding:9px 8px; font-family:'IBM Plex Sans', sans-serif; font-size:12.5px; font-weight:500;
+    color:var(--ink); cursor:pointer; text-align:left; line-height:1.25;
+  }
+  .joint-type-grid button:hover{border-color:var(--navy);}
+  .joint-type-grid button.active{border-color:var(--red); background:#FBEDEC; color:var(--red); font-weight:600;}
+
+  .checkbox-row{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--steel); margin:10px 0 0 0; cursor:pointer;}
+  .checkbox-row input{accent-color:var(--red);}
+
+  .sheet-wrap{width:100%; max-width:960px;}
+  .sheet{
+    width:100%; background:var(--blueprint); border-radius:8px;
+    box-shadow:0 10px 30px rgba(15,29,54,0.25); overflow:hidden;
+  }
+  .sheet svg{display:block; width:100%; height:auto;}
+  .cross-section-row{display:flex; gap:14px; margin-top:14px; flex-wrap:wrap;}
+  .cross-section-card{
+    flex:1; min-width:220px;
+    background:var(--blueprint); border-radius:8px;
+    box-shadow:0 6px 18px rgba(15,29,54,0.2); overflow:hidden;
+  }
+  .cross-section-card svg{display:block; width:100%; height:auto;}
+  .cross-section-label{
+    background:var(--navy-deep); color:#D9E1EC;
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.05em;
+    padding:8px 12px; text-transform:uppercase;
+  }
+
+  .desc-panel{
+    width:100%; max-width:960px;
+    background:white; border:1px solid var(--steel-light); border-radius:8px; padding:16px 18px;
+  }
+  .desc-panel h2{
+    font-family:'IBM Plex Sans Condensed', sans-serif; font-size:15px; color:var(--navy);
+    margin:0 0 10px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .desc-text{
+    font-size:13.5px; line-height:1.6; color:var(--ink);
+    background:var(--paper); border-radius:6px; padding:12px 14px;
+  }
+  .btn-copy{
+    padding:8px 14px; border-radius:6px; border:1.5px solid var(--navy);
+    background:var(--navy); color:white; font-weight:600; font-size:12.5px; cursor:pointer;
+  }
+  .btn-copy:hover{background:#12213D;}
+  .copy-status{font-size:12px; color:var(--steel); margin-left:10px;}
+
+  .disclaimer{font-size:11px; color:var(--steel); text-align:center; line-height:1.5; max-width:960px;}
+  .attribution{display:block; margin-top:6px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:var(--steel); opacity:0.85;}
+</style>
+</head>
+<body>
+
+<h1 class="sr-only">Antelope Valley College Joint Builder — build parametric structural joints from real material dimensions</h1>
+
+<div class="app-header" role="banner">
+  <div class="header-titles">
+    <span class="header-eyebrow">AVC · CTE Welding</span>
+    <span class="header-title">Joint Builder</span>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar" role="form" aria-label="Joint builder controls">
+
+    <fieldset>
+      <legend>Joint arrangement</legend>
+      <div class="joint-type-grid" id="joint-type-grid" role="group" aria-label="Joint type"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Members</legend>
+      <div class="member-tabs" role="tablist" aria-label="Which member to edit">
+        <button id="tab-member-0" role="tab" aria-selected="true" onclick="selectMember(0)">Member 1</button>
+        <button id="tab-member-1" role="tab" aria-selected="false" onclick="selectMember(1)">Member 2</button>
+      </div>
+      <div id="member-editor"></div>
+    </fieldset>
+
+  </div>
+
+  <div class="main">
+    <div class="sheet-wrap">
+      <div class="sheet">
+        <svg id="elevation-svg" viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
+          <title id="ev-title">Joint elevation view</title>
+          <desc id="ev-desc">Side view of the two members meeting at the selected joint</desc>
+        </svg>
+      </div>
+      <div class="cross-section-row" id="cross-section-row"></div>
+    </div>
+
+    <div class="desc-panel">
+      <h2>Joint description <span></span></h2>
+      <p class="field-hint" style="margin:-6px 0 10px;">Plain-language description of the joint geometry, generated from the dimensions above. Ready to paste as the opening paragraph in Blueprint Viewer — add the "Weld Symbol:" portion from Symbol Builder separately.</p>
+      <div class="desc-text" id="desc-text"></div>
+      <div style="margin-top:10px;">
+        <button type="button" class="btn-copy" id="copy-desc-btn">Copy description</button>
+        <span class="copy-status" id="copy-status" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+
+    <p class="disclaimer">
+      Educational use only. Simplified for instructional clarity — shape proportions are representative, not mill-certified.
+      <span class="attribution">Built by Caleb Healey — AVC CTE Welding</span>
+    </p>
+  </div>
+</div>
+
+<script src="joint-materials.js"></script>
+<script src="joint-app.js"></script>
+</body>
+</html>
