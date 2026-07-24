@@ -1,186 +1,381 @@
 // ============================================================
-// JOINT MATERIALS LIBRARY
-// Parametric structural shapes for the Joint Builder.
-//
-// Every member is always drawn in ELEVATION (a side view along its
-// length — this is what a plate, tube, beam, or bar looks like from
-// the side, and it's honest for every material because you're seeing
-// its true outer silhouette).
-//
-// Materials whose true cross-section shape would otherwise be invisible
-// or misleading in elevation alone (anything that isn't a plain
-// rectangle when you look at its cut end — tube, angle, channel, beam,
-// round bar) also get an automatic CROSS-SECTION view: the true cut
-// profile, shown the same way Board 2-2's Joint 6 added a top view to
-// show a pipe's roundness alongside its front-view rectangle.
+// JOINT BUILDER — APPLICATION LOGIC
 // ============================================================
 
-const MATERIAL_PARAM_DEFS = {
-  thickness:   { label: "Thickness",        unit: "in", default: 0.5,   min: 0.0625, max: 4,  step: 0.0625 },
-  length:      { label: "Length",           unit: "in", default: 4,     min: 0.5,    max: 24, step: 0.125 },
-  legA:        { label: "Leg A Length",     unit: "in", default: 3,     min: 0.5,    max: 12, step: 0.125 },
-  legB:        { label: "Leg B Length",     unit: "in", default: 3,     min: 0.5,    max: 12, step: 0.125 },
-  angleThick:  { label: "Thickness",        unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
-  outerDia:    { label: "Outer Diameter",   unit: "in", default: 2,     min: 0.25,   max: 12, step: 0.125 },
-  wallThick:   { label: "Wall Thickness",   unit: "in", default: 0.188, min: 0.035,  max: 1,  step: 0.0155 },
-  tubeWidth:   { label: "Width",            unit: "in", default: 2,     min: 0.5,    max: 12, step: 0.125 },
-  tubeHeight:  { label: "Height",           unit: "in", default: 2,     min: 0.5,    max: 12, step: 0.125 },
-  depth:       { label: "Depth",            unit: "in", default: 6,     min: 1,      max: 24, step: 0.125 },
-  flangeWidth: { label: "Flange Width",     unit: "in", default: 4,     min: 1,      max: 16, step: 0.125 },
-  flangeThick: { label: "Flange Thickness", unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
-  webThick:    { label: "Web Thickness",    unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
-  barDia:      { label: "Diameter",         unit: "in", default: 1,     min: 0.125,  max: 6,  step: 0.0625 },
-  barSide:     { label: "Side",             unit: "in", default: 1,     min: 0.125,  max: 6,  step: 0.0625 }
+const state = {
+  jointType: "tjoint",
+  viewMode: "front",
+  activeMember: 0,
+  members: [
+    { material: "flat", dims: defaultDims("flat"), rotation: 0 },
+    { material: "flat", dims: defaultDims("flat"), rotation: 0 }
+  ]
 };
 
-// crossSectionKind: null means the elevation rectangle already tells the
-// whole story (flat stock, square bar) — no second view is generated.
-const MATERIAL_TYPES = {
-  flat: {
-    label: "Flat Stock", group: "Flat Stock",
-    params: ["thickness", "length"],
-    elevationSize: d => ({ h: d.thickness, w: d.length }),
-    crossSectionKind: null,
-    describe: d => `a flat plate ${fmtIn(d.thickness)} thick and ${fmtIn(d.length)} long`
-  },
-  angle: {
-    label: "Angle Iron (L-Shape)", group: "Angle Iron",
-    params: ["legA", "legB", "angleThick", "length"],
-    elevationSize: d => ({ h: Math.max(d.legA, d.legB), w: d.length }),
-    crossSectionKind: "angle",
-    crossSectionSize: d => ({ h: d.legA, w: d.legB }),
-    describe: d => `an angle iron with a ${fmtIn(d.legA)} leg and a ${fmtIn(d.legB)} leg, ${fmtIn(d.angleThick)} thick, ${fmtIn(d.length)} long`
-  },
-  roundtube: {
-    label: "Round Tube / Pipe", group: "Tube / Pipe",
-    params: ["outerDia", "wallThick", "length"],
-    elevationSize: d => ({ h: d.outerDia, w: d.length }),
-    crossSectionKind: "roundtube",
-    crossSectionSize: d => ({ h: d.outerDia, w: d.outerDia }),
-    describe: d => `a round tube with a ${fmtIn(d.outerDia)} outer diameter, ${fmtIn(d.wallThick)} wall thickness, and ${fmtIn(d.length)} length`
-  },
-  sqtube: {
-    label: "Square / Rectangular Tube", group: "Tube / Pipe",
-    params: ["tubeWidth", "tubeHeight", "wallThick", "length"],
-    elevationSize: d => ({ h: d.tubeHeight, w: d.length }),
-    crossSectionKind: "sqtube",
-    crossSectionSize: d => ({ h: d.tubeHeight, w: d.tubeWidth }),
-    describe: d => `a rectangular tube ${fmtIn(d.tubeWidth)} by ${fmtIn(d.tubeHeight)}, ${fmtIn(d.wallThick)} wall thickness, ${fmtIn(d.length)} long`
-  },
-  cchannel: {
-    label: "C-Channel", group: "C-Channel",
-    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
-    elevationSize: d => ({ h: d.depth, w: d.length }),
-    crossSectionKind: "cchannel",
-    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
-    describe: d => `a C-channel ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
-  },
-  ibeam: {
-    label: "I-Beam (W-Shape)", group: "I-Beam",
-    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
-    elevationSize: d => ({ h: d.depth, w: d.length }),
-    crossSectionKind: "ibeam",
-    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
-    describe: d => `a wide-flange I-beam (W-shape) ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
-  },
-  sbeam: {
-    label: "S-Beam (Standard I-Shape)", group: "Structural Steel",
-    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
-    elevationSize: d => ({ h: d.depth, w: d.length }),
-    crossSectionKind: "sbeam",
-    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
-    describe: d => `a standard I-beam (S-shape) ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
-  },
-  roundbar: {
-    label: "Round Bar", group: "Structural Steel",
-    params: ["barDia", "length"],
-    elevationSize: d => ({ h: d.barDia, w: d.length }),
-    crossSectionKind: "roundbar",
-    crossSectionSize: d => ({ h: d.barDia, w: d.barDia }),
-    describe: d => `a round solid bar ${fmtIn(d.barDia)} in diameter and ${fmtIn(d.length)} long`
-  },
-  squarebar: {
-    label: "Square Bar", group: "Structural Steel",
-    params: ["barSide", "length"],
-    elevationSize: d => ({ h: d.barSide, w: d.length }),
-    crossSectionKind: null,
-    describe: d => `a square solid bar ${fmtIn(d.barSide)} in per side and ${fmtIn(d.length)} long`
-  }
+// Quarter-turn rotation swaps which of a member's two dimensions in
+// the CURRENT principal view reads as "up" vs. "across" — lets you
+// spin a member to place the weld symbol wherever reads best.
+function getEffectiveSize(member) {
+  const mat = MATERIAL_TYPES[member.material];
+  const raw = PRINCIPAL_VIEWS[state.viewMode].size(mat, member.dims);
+  const rot = member.rotation || 0;
+  return (rot === 90 || rot === 270) ? { h: raw.w, w: raw.h } : raw;
+}
+
+const NAVY = "#8FA3C2";
+const NAVY_STROKE = "#E8EEF5";
+const RED_ACCENT = "#F2C744";
+
+// ---------- Sentence templates per joint arrangement ----------
+const JOINT_SENTENCE = {
+  tjoint: (d1, d2) => `T-joint formed by ${d2} welded perpendicular to ${d1}.`,
+  butt:   (d1, d2) => `Butt joint formed by ${d1} and ${d2}, joined edge to edge in the same plane.`,
+  lap:    (d1, d2) => `Lap joint formed by ${d1} overlapping ${d2}.`,
+  corner: (d1, d2) => `Corner joint formed by ${d1} and ${d2}, meeting at a right-angle corner.`,
+  edge:   (d1, d2) => `Edge joint formed by ${d1} and ${d2}, stacked with edges aligned.`
 };
 
-const MATERIAL_GROUPS = ["Flat Stock", "Angle Iron", "Tube / Pipe", "C-Channel", "I-Beam", "Structural Steel"];
+function $(id) { return document.getElementById(id); }
 
-const JOINT_ARRANGEMENTS = {
-  tjoint:  { label: "T-Joint",   desc: "Member 2 stands perpendicular on top of Member 1, forming a T." },
-  butt:    { label: "Butt Joint", desc: "Members meet edge to edge in the same plane." },
-  lap:     { label: "Lap Joint",  desc: "Members overlap, one above the other." },
-  corner:  { label: "Corner Joint", desc: "Members meet at a right-angle corner, like the corner of a frame." },
-  edge:    { label: "Edge Joint", desc: "Members sit directly on top of one another, edges aligned." }
-};
-
-function fmtIn(n) {
-  const r = Math.round(n * 10000) / 10000;
-  return `${r}"`;
+// ---------- Principal view picker (Front / Top / End) ----------
+function renderViewModeGrid() {
+  const grid = $("view-mode-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  Object.keys(PRINCIPAL_VIEWS).forEach(key => {
+    const v = PRINCIPAL_VIEWS[key];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = state.viewMode === key ? "active" : "";
+    b.textContent = v.label;
+    b.setAttribute("aria-pressed", state.viewMode === key ? "true" : "false");
+    b.addEventListener("click", () => { state.viewMode = key; renderElevation(); renderViewModeGrid(); });
+    grid.appendChild(b);
+  });
 }
 
-function defaultDims(materialKey) {
-  const mat = MATERIAL_TYPES[materialKey];
-  const d = {};
-  mat.params.forEach(p => { d[p] = MATERIAL_PARAM_DEFS[p].default; });
-  return d;
+// ---------- Joint type picker ----------
+function renderJointTypeGrid() {
+  const grid = $("joint-type-grid");
+  grid.innerHTML = "";
+  Object.keys(JOINT_ARRANGEMENTS).forEach(key => {
+    const j = JOINT_ARRANGEMENTS[key];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = state.jointType === key ? "active" : "";
+    b.textContent = j.label;
+    b.setAttribute("aria-pressed", state.jointType === key ? "true" : "false");
+    b.addEventListener("click", () => { state.jointType = key; render(); });
+    grid.appendChild(b);
+  });
 }
 
-// ---------- Cross-section path builders ----------
-// All coordinates are in real-world inches, origin at the shape's own
-// top-left bounding corner. joint-app.js scales + translates into place.
+// ---------- Member tabs ----------
+function selectMember(i) {
+  state.activeMember = i;
+  render();
+}
 
-function crossSectionPoints(kind, d) {
-  switch (kind) {
-    case "angle": {
-      const t = d.angleThick;
-      return [[0,0],[t,0],[t,d.legA-t],[d.legB,d.legA-t],[d.legB,d.legA],[0,d.legA]];
+// ---------- Member editor (material + dimension fields) ----------
+function renderMemberEditor() {
+  $("tab-member-0").classList.toggle("active", state.activeMember === 0);
+  $("tab-member-0").setAttribute("aria-selected", state.activeMember === 0 ? "true" : "false");
+  $("tab-member-1").classList.toggle("active", state.activeMember === 1);
+  $("tab-member-1").setAttribute("aria-selected", state.activeMember === 1 ? "true" : "false");
+
+  const member = state.members[state.activeMember];
+  const container = $("member-editor");
+  container.innerHTML = "";
+
+  const matLabel = document.createElement("label");
+  matLabel.setAttribute("for", "material-select");
+  matLabel.textContent = "Material type";
+  matLabel.style.cssText = "display:block;font-size:13px;font-weight:600;margin-bottom:5px;";
+  container.appendChild(matLabel);
+
+  const select = document.createElement("select");
+  select.id = "material-select";
+  MATERIAL_GROUPS.forEach(group => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group;
+    Object.keys(MATERIAL_TYPES).filter(k => MATERIAL_TYPES[k].group === group).forEach(key => {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = MATERIAL_TYPES[key].label;
+      if (key === member.material) opt.selected = true;
+      optgroup.appendChild(opt);
+    });
+    select.appendChild(optgroup);
+  });
+  select.addEventListener("change", () => {
+    member.material = select.value;
+    member.dims = defaultDims(select.value);
+    member.rotation = 0;
+    render();
+  });
+  container.appendChild(select);
+
+  // Orientation — quarter-turn rotation of this member within the elevation view
+  const rotateRow = document.createElement("div");
+  rotateRow.className = "rotate-row";
+  const rotateBtn = document.createElement("button");
+  rotateBtn.type = "button";
+  rotateBtn.className = "btn-rotate";
+  rotateBtn.innerHTML = "&#8635; Rotate 90&deg;";
+  rotateBtn.setAttribute("aria-label", "Rotate this member a quarter turn");
+  const rotateReadout = document.createElement("span");
+  rotateReadout.className = "rotate-readout";
+  rotateReadout.id = "rotate-readout";
+  rotateReadout.textContent = "Orientation: " + (member.rotation || 0) + "\u00B0";
+  rotateBtn.addEventListener("click", () => {
+    member.rotation = ((member.rotation || 0) + 90) % 360;
+    rotateReadout.textContent = "Orientation: " + member.rotation + "\u00B0";
+    renderElevation();
+    renderDescription();
+  });
+  rotateRow.appendChild(rotateBtn);
+  rotateRow.appendChild(rotateReadout);
+  container.appendChild(rotateRow);
+
+  const dimsWrap = document.createElement("div");
+  dimsWrap.style.marginTop = "14px";
+  const mat = MATERIAL_TYPES[member.material];
+  mat.params.forEach(paramKey => {
+    const def = MATERIAL_PARAM_DEFS[paramKey];
+    const group = document.createElement("div");
+    group.className = "field-group";
+
+    const label = document.createElement("label");
+    label.setAttribute("for", "dim-range-" + paramKey);
+    label.textContent = def.label;
+    group.appendChild(label);
+
+    const row = document.createElement("div");
+    row.className = "number-input-row";
+
+    const range = document.createElement("input");
+    range.type = "range";
+    range.id = "dim-range-" + paramKey;
+    range.min = def.min; range.max = def.max; range.step = def.step;
+    range.value = member.dims[paramKey];
+
+    const number = document.createElement("input");
+    number.type = "number";
+    number.id = "dim-num-" + paramKey;
+    number.min = def.min; number.max = def.max; number.step = def.step;
+    number.value = member.dims[paramKey];
+    number.setAttribute("aria-label", def.label + " in inches, type an exact value");
+
+    const unit = document.createElement("span");
+    unit.className = "unit-suffix";
+    unit.setAttribute("aria-hidden", "true");
+    unit.textContent = def.unit || "";
+
+    function applyValue(v) {
+      const clamped = Math.min(def.max, Math.max(def.min, v));
+      member.dims[paramKey] = clamped;
+      range.value = clamped;
+      number.value = clamped;
+      renderElevation();
+      renderCrossSections();
+      renderDescription();
     }
-    case "sqtube": {
-      // returns two rects (outer, inner) rather than a single polygon
-      return null; // handled specially in renderer
-    }
-    case "cchannel": {
-      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
-      return [[0,0],[fw,0],[fw,ft],[wt,ft],[wt,dep-ft],[fw,dep-ft],[fw,dep],[0,dep]];
-    }
-    case "ibeam": {
-      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
-      const cx1 = (fw - wt) / 2, cx2 = (fw + wt) / 2;
-      return [
-        [0,0],[fw,0],[fw,ft],[cx2,ft],[cx2,dep-ft],[fw,dep-ft],[fw,dep],[0,dep],
-        [0,dep-ft],[cx1,dep-ft],[cx1,ft],[0,ft]
-      ];
-    }
-    case "sbeam": {
-      // Same envelope as an I-beam but with tapered (sloped) flange
-      // faces on the inside — the visual cue that distinguishes an
-      // S-shape (American Standard) from a W-shape (wide-flange).
-      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
-      const taper = Math.min(fw * 0.18, ft * 1.4);
-      const cx1 = (fw - wt) / 2, cx2 = (fw + wt) / 2;
-      return [
-        [0,0],[fw,0],[fw,ft],[cx2+taper,ft],[cx2,dep-ft],[fw,dep-ft],[fw,dep],[0,dep],
-        [0,dep-ft],[cx1,dep-ft],[cx1-taper,ft],[0,ft]
-      ];
-    }
-    default:
-      return null;
+    range.addEventListener("input", () => applyValue(parseFloat(range.value)));
+    number.addEventListener("change", () => {
+      const v = parseFloat(number.value);
+      applyValue(isNaN(v) ? def.default : v);
+    });
+
+    row.appendChild(range);
+    row.appendChild(number);
+    row.appendChild(unit);
+    group.appendChild(row);
+    dimsWrap.appendChild(group);
+  });
+  container.appendChild(dimsWrap);
+}
+
+// ---------- Layout math (real-world inches, before scaling) ----------
+function computeLayout() {
+  const s1 = getEffectiveSize(state.members[0]);
+  const s2 = getEffectiveSize(state.members[1]);
+
+  if (state.jointType === "tjoint") {
+    const totalW = Math.max(s1.w, s2.h);
+    const totalH = s1.h + s2.w;
+    const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: (totalW - s2.h) / 2, y: 0, w: s2.h, h: s2.w };
+    return { m1, m2, totalW, totalH };
   }
+  if (state.jointType === "butt") {
+    const gap = Math.max(s1.w, s2.w) * 0.015;
+    const totalW = s1.w + s2.w + gap;
+    const totalH = Math.max(s1.h, s2.h);
+    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: s1.w + gap, y: totalH - s2.h, w: s2.w, h: s2.h };
+    return { m1, m2, totalW, totalH };
+  }
+  if (state.jointType === "lap") {
+    const overlap = Math.min(s1.w, s2.w) * 0.4;
+    const totalW = s1.w + s2.w - overlap;
+    const totalH = s1.h + s2.h;
+    const m1 = { x: 0, y: s2.h, w: s1.w, h: s1.h };
+    const m2 = { x: s1.w - overlap, y: 0, w: s2.w, h: s2.h };
+    return { m1, m2, totalW, totalH };
+  }
+  if (state.jointType === "corner") {
+    const totalW = s1.w;
+    const totalH = s1.h + s2.w;
+    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
+    return { m1, m2, totalW, totalH };
+  }
+  // edge — edges sit directly against one another, no gap
+  const totalW = Math.max(s1.w, s2.w);
+  const totalH = s1.h + s2.h;
+  const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
+  const m2 = { x: (totalW - s2.w) / 2, y: 0, w: s2.w, h: s2.h };
+  return { m1, m2, totalW, totalH };
 }
 
-function crossSectionCircles(kind, d) {
-  if (kind === "roundtube") {
-    const r = d.outerDia / 2;
-    const inner = Math.max(r - d.wallThick, 0);
-    return { outerR: r, innerR: inner };
-  }
-  if (kind === "roundbar") {
-    return { outerR: d.barDia / 2, innerR: 0 };
-  }
-  return null;
+// ---------- Elevation view rendering ----------
+function dimLineH(x1, x2, y, label) {
+  return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<line x1="${x1}" y1="${y-5}" x2="${x1}" y2="${y+5}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<line x1="${x2}" y1="${y-5}" x2="${x2}" y2="${y+5}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<text x="${(x1+x2)/2}" y="${y-8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC">${label}</text>`;
 }
+function dimLineV(y1, y2, x, label) {
+  return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<line x1="${x-5}" y1="${y1}" x2="${x+5}" y2="${y1}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<line x1="${x-5}" y1="${y2}" x2="${x+5}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
+    `<text x="${x-8}" y="${(y1+y2)/2}" text-anchor="end" dominant-baseline="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC" transform="rotate(0 ${x-8} ${(y1+y2)/2})">${label}</text>`;
+}
+
+function renderElevation() {
+  const svg = $("elevation-svg");
+  const layout = computeLayout();
+  const padX = 90, padTop = 60, padBottom = 60;
+  const usableW = 900 - padX * 2;
+  const usableH = 460 - padTop - padBottom;
+  const scale = Math.min(usableW / layout.totalW, usableH / layout.totalH);
+  const offX = padX + (usableW - layout.totalW * scale) / 2;
+  const offY = padTop + (usableH - layout.totalH * scale) / 2;
+
+  function px(rect) {
+    return { x: offX + rect.x * scale, y: offY + rect.y * scale, w: rect.w * scale, h: rect.h * scale };
+  }
+  const r1 = px(layout.m1), r2 = px(layout.m2);
+
+  let markup = "";
+  if (state.viewMode === "end") {
+    markup += trueShapeMarkup(state.members[0], r1);
+    markup += trueShapeMarkup(state.members[1], r2);
+  } else {
+    markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+    markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  }
+
+  // Member 1 dimensions: width along the bottom, height along the left
+  markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y, r2.y + r2.h) + r1.h + 34, fmtIn(layout.m1.w));
+  markup += dimLineV(r1.y, r1.y + r1.h, r1.x - 20, fmtIn(layout.m1.h));
+
+  // Member 2 dimensions: its own length + thickness, placed clear of member 1
+  const m2LengthIsVertical = state.jointType === "tjoint" || state.jointType === "corner";
+  if (m2LengthIsVertical) {
+    markup += dimLineV(r2.y, r2.y + r2.h, r2.x + r2.w + 20, fmtIn(layout.m2.h));
+    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
+  } else {
+    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
+    markup += dimLineV(r2.y, r2.y + r2.h, r2.x - 20, fmtIn(layout.m2.h));
+  }
+
+  markup += `<text x="${r1.x + r1.w/2}" y="${r1.y + r1.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M1</text>`;
+  markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M2</text>`;
+
+  svg.innerHTML = markup;
+  svg.querySelector("title").textContent = PRINCIPAL_VIEWS[state.viewMode].label;
+  svg.querySelector("desc").textContent =
+    `${PRINCIPAL_VIEWS[state.viewMode].label} of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
+}
+
+// ---------- True cross-section shape rendering (used for End view) ----------
+// naturalSize/scale are computed in the shape's own unrotated orientation,
+// then the whole shape is rotated around the target rect's center — this
+// keeps asymmetric shapes (angle iron, C-channel) genuinely correct under
+// quarter-turn rotation rather than just stretching to fit.
+function trueShapeMarkup(member, rectPx) {
+  const mat = MATERIAL_TYPES[member.material];
+  const kind = mat.crossSectionKind;
+  const dims = member.dims;
+  const rotationDeg = member.rotation || 0;
+  const naturalSize = mat.crossSectionSize(dims);
+
+  const rotated90 = rotationDeg === 90 || rotationDeg === 270;
+  const boxW = rotated90 ? rectPx.h : rectPx.w;
+  const boxH = rotated90 ? rectPx.w : rectPx.h;
+  const shapeScale = Math.min(boxW / naturalSize.w, boxH / naturalSize.h);
+  const shapeW = naturalSize.w * shapeScale, shapeH = naturalSize.h * shapeScale;
+  const cx = rectPx.x + rectPx.w / 2, cy = rectPx.y + rectPx.h / 2;
+  const offX = cx - shapeW / 2, offY = cy - shapeH / 2;
+
+  let inner = "";
+  const circles = crossSectionCircles(kind, dims);
+  if (circles) {
+    const ccx = offX + shapeW / 2, ccy = offY + shapeH / 2;
+    inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.outerR * shapeScale}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+    if (circles.innerR > 0) {
+      inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.innerR * shapeScale}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
+    }
+  } else if (kind === "sqtube") {
+    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+    const wt = dims.wallThick * shapeScale;
+    const iw = Math.max(shapeW - wt * 2, 0), ih = Math.max(shapeH - wt * 2, 0);
+    if (iw > 0 && ih > 0) {
+      inner += `<rect x="${offX + wt}" y="${offY + wt}" width="${iw}" height="${ih}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
+    }
+  } else if (kind === "rect") {
+    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+  } else {
+    const pts = crossSectionPoints(kind, dims);
+    if (pts) {
+      const scaled = pts.map(([x, y]) => `${offX + x * shapeScale},${offY + y * shapeScale}`).join(" ");
+      inner += `<polygon points="${scaled}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+    }
+  }
+
+  if (rotationDeg !== 0) {
+    return `<g transform="rotate(${rotationDeg} ${cx} ${cy})">${inner}</g>`;
+  }
+  return inner;
+}
+function vbBg() { return "#12324F"; }
+
+// ---------- Description generator ----------
+function renderDescription() {
+  const d1 = MATERIAL_TYPES[state.members[0].material].describe(state.members[0].dims);
+  const d2 = MATERIAL_TYPES[state.members[1].material].describe(state.members[1].dims);
+  const sentence = JOINT_SENTENCE[state.jointType](d1, d2);
+  $("desc-text").textContent = sentence;
+}
+
+$("copy-desc-btn").addEventListener("click", () => {
+  const text = $("desc-text").textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    $("copy-status").textContent = "Copied.";
+    setTimeout(() => { $("copy-status").textContent = ""; }, 2500);
+  }).catch(() => {
+    $("copy-status").textContent = "Could not copy — select and copy the text manually.";
+  });
+});
+
+// ---------- Orchestration ----------
+function render() {
+  renderViewModeGrid();
+  renderJointTypeGrid();
+  renderMemberEditor();
+  renderElevation();
+  renderDescription();
+}
+
+render();
