@@ -75,6 +75,18 @@
     font-size:13px; font-weight:500; color:var(--ink); margin-bottom:5px;
   }
   .field-group .field-value{font-family:'IBM Plex Mono', monospace; color:var(--red); font-weight:600;}
+  .number-input-row{display:flex; align-items:center; gap:8px;}
+  .number-input-row input[type="range"]{flex:2;}
+  .number-input-row input[type="number"]{flex:1; min-width:0;}
+  .unit-suffix{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel); min-width:14px;}
+  .rotate-row{display:flex; align-items:center; gap:10px; margin:4px 0 14px;}
+  .btn-rotate{
+    padding:8px 14px; border-radius:6px; border:1.5px solid var(--control-border);
+    background:white; color:var(--navy); font-weight:600; font-size:13px; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+  }
+  .btn-rotate:hover{border-color:var(--red); color:var(--red);}
+  .rotate-readout{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel);}
   select, input[type="text"], input[type="number"]{
     width:100%; padding:8px 9px;
     border:1.5px solid var(--control-border); border-radius:5px;
@@ -164,6 +176,12 @@
   <div class="sidebar" role="form" aria-label="Joint builder controls">
 
     <fieldset>
+      <legend>Principal view</legend>
+      <div class="joint-type-grid" id="view-mode-grid" role="group" aria-label="Front, top, or end view"></div>
+      <p class="field-hint" style="margin-top:8px;">Choose whichever view best exposes the joint for placing the weld symbol. Front and Top are side views along each member's length; End looks straight down the length at the true cut shape.</p>
+    </fieldset>
+
+    <fieldset>
       <legend>Joint arrangement</legend>
       <div class="joint-type-grid" id="joint-type-grid" role="group" aria-label="Joint type"></div>
     </fieldset>
@@ -183,11 +201,10 @@
     <div class="sheet-wrap">
       <div class="sheet">
         <svg id="elevation-svg" viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
-          <title id="ev-title">Joint elevation view</title>
-          <desc id="ev-desc">Side view of the two members meeting at the selected joint</desc>
+          <title id="ev-title">Joint view</title>
+          <desc id="ev-desc">View of the two members meeting at the selected joint</desc>
         </svg>
       </div>
-      <div class="cross-section-row" id="cross-section-row"></div>
     </div>
 
     <div class="desc-panel">
