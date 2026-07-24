@@ -4,12 +4,23 @@
 
 const state = {
   jointType: "tjoint",
+  viewMode: "front",
   activeMember: 0,
   members: [
-    { material: "flat", dims: defaultDims("flat") },
-    { material: "flat", dims: defaultDims("flat") }
+    { material: "flat", dims: defaultDims("flat"), rotation: 0 },
+    { material: "flat", dims: defaultDims("flat"), rotation: 0 }
   ]
 };
+
+// Quarter-turn rotation swaps which of a member's two dimensions in
+// the CURRENT principal view reads as "up" vs. "across" — lets you
+// spin a member to place the weld symbol wherever reads best.
+function getEffectiveSize(member) {
+  const mat = MATERIAL_TYPES[member.material];
+  const raw = PRINCIPAL_VIEWS[state.viewMode].size(mat, member.dims);
+  const rot = member.rotation || 0;
+  return (rot === 90 || rot === 270) ? { h: raw.w, w: raw.h } : raw;
+}
 
 const NAVY = "#8FA3C2";
 const NAVY_STROKE = "#E8EEF5";
@@ -25,6 +36,23 @@ const JOINT_SENTENCE = {
 };
 
 function $(id) { return document.getElementById(id); }
+
+// ---------- Principal view picker (Front / Top / End) ----------
+function renderViewModeGrid() {
+  const grid = $("view-mode-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  Object.keys(PRINCIPAL_VIEWS).forEach(key => {
+    const v = PRINCIPAL_VIEWS[key];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = state.viewMode === key ? "active" : "";
+    b.textContent = v.label;
+    b.setAttribute("aria-pressed", state.viewMode === key ? "true" : "false");
+    b.addEventListener("click", () => { state.viewMode = key; renderElevation(); renderViewModeGrid(); });
+    grid.appendChild(b);
+  });
+}
 
 // ---------- Joint type picker ----------
 function renderJointTypeGrid() {
@@ -82,9 +110,32 @@ function renderMemberEditor() {
   select.addEventListener("change", () => {
     member.material = select.value;
     member.dims = defaultDims(select.value);
+    member.rotation = 0;
     render();
   });
   container.appendChild(select);
+
+  // Orientation — quarter-turn rotation of this member within the elevation view
+  const rotateRow = document.createElement("div");
+  rotateRow.className = "rotate-row";
+  const rotateBtn = document.createElement("button");
+  rotateBtn.type = "button";
+  rotateBtn.className = "btn-rotate";
+  rotateBtn.innerHTML = "&#8635; Rotate 90&deg;";
+  rotateBtn.setAttribute("aria-label", "Rotate this member a quarter turn");
+  const rotateReadout = document.createElement("span");
+  rotateReadout.className = "rotate-readout";
+  rotateReadout.id = "rotate-readout";
+  rotateReadout.textContent = "Orientation: " + (member.rotation || 0) + "\u00B0";
+  rotateBtn.addEventListener("click", () => {
+    member.rotation = ((member.rotation || 0) + 90) % 360;
+    rotateReadout.textContent = "Orientation: " + member.rotation + "\u00B0";
+    renderElevation();
+    renderDescription();
+  });
+  rotateRow.appendChild(rotateBtn);
+  rotateRow.appendChild(rotateReadout);
+  container.appendChild(rotateRow);
 
   const dimsWrap = document.createElement("div");
   dimsWrap.style.marginTop = "14px";
@@ -95,50 +146,59 @@ function renderMemberEditor() {
     group.className = "field-group";
 
     const label = document.createElement("label");
-    label.setAttribute("for", "dim-" + paramKey);
-    const valSpan = document.createElement("span");
-    valSpan.className = "field-value";
-    valSpan.id = "dimval-" + paramKey;
-    valSpan.textContent = fmtIn(member.dims[paramKey]);
-    label.textContent = def.label + " ";
-    label.appendChild(valSpan);
+    label.setAttribute("for", "dim-range-" + paramKey);
+    label.textContent = def.label;
     group.appendChild(label);
+
+    const row = document.createElement("div");
+    row.className = "number-input-row";
 
     const range = document.createElement("input");
     range.type = "range";
-    range.id = "dim-" + paramKey;
+    range.id = "dim-range-" + paramKey;
     range.min = def.min; range.max = def.max; range.step = def.step;
     range.value = member.dims[paramKey];
-    range.addEventListener("input", () => {
-      member.dims[paramKey] = parseFloat(range.value);
-      valSpan.textContent = fmtIn(member.dims[paramKey]);
+
+    const number = document.createElement("input");
+    number.type = "number";
+    number.id = "dim-num-" + paramKey;
+    number.min = def.min; number.max = def.max; number.step = def.step;
+    number.value = member.dims[paramKey];
+    number.setAttribute("aria-label", def.label + " in inches, type an exact value");
+
+    const unit = document.createElement("span");
+    unit.className = "unit-suffix";
+    unit.setAttribute("aria-hidden", "true");
+    unit.textContent = def.unit || "";
+
+    function applyValue(v) {
+      const clamped = Math.min(def.max, Math.max(def.min, v));
+      member.dims[paramKey] = clamped;
+      range.value = clamped;
+      number.value = clamped;
       renderElevation();
       renderCrossSections();
       renderDescription();
+    }
+    range.addEventListener("input", () => applyValue(parseFloat(range.value)));
+    number.addEventListener("change", () => {
+      const v = parseFloat(number.value);
+      applyValue(isNaN(v) ? def.default : v);
     });
-    group.appendChild(range);
+
+    row.appendChild(range);
+    row.appendChild(number);
+    row.appendChild(unit);
+    group.appendChild(row);
     dimsWrap.appendChild(group);
   });
   container.appendChild(dimsWrap);
-
-  const showCrossToggle = document.createElement("label");
-  showCrossToggle.className = "checkbox-row";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.checked = member.showCrossSection !== false;
-  cb.disabled = !mat.crossSectionKind;
-  cb.addEventListener("change", () => { member.showCrossSection = cb.checked; renderCrossSections(); });
-  showCrossToggle.appendChild(cb);
-  showCrossToggle.appendChild(document.createTextNode(
-    mat.crossSectionKind ? "Show true cross-section view" : "This shape is fully shown by the elevation view alone"
-  ));
-  container.appendChild(showCrossToggle);
 }
 
 // ---------- Layout math (real-world inches, before scaling) ----------
 function computeLayout() {
-  const s1 = MATERIAL_TYPES[state.members[0].material].elevationSize(state.members[0].dims);
-  const s2 = MATERIAL_TYPES[state.members[1].material].elevationSize(state.members[1].dims);
+  const s1 = getEffectiveSize(state.members[0]);
+  const s2 = getEffectiveSize(state.members[1]);
 
   if (state.jointType === "tjoint") {
     const totalW = Math.max(s1.w, s2.h);
@@ -170,10 +230,9 @@ function computeLayout() {
     const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
     return { m1, m2, totalW, totalH };
   }
-  // edge
-  const gapY = Math.max(s1.h, s2.h) * 0.25;
+  // edge — edges sit directly against one another, no gap
   const totalW = Math.max(s1.w, s2.w);
-  const totalH = s1.h + gapY + s2.h;
+  const totalH = s1.h + s2.h;
   const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
   const m2 = { x: (totalW - s2.w) / 2, y: 0, w: s2.w, h: s2.h };
   return { m1, m2, totalW, totalH };
@@ -209,8 +268,13 @@ function renderElevation() {
   const r1 = px(layout.m1), r2 = px(layout.m2);
 
   let markup = "";
-  markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
-  markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  if (state.viewMode === "end") {
+    markup += trueShapeMarkup(state.members[0], r1);
+    markup += trueShapeMarkup(state.members[1], r2);
+  } else {
+    markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+    markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  }
 
   // Member 1 dimensions: width along the bottom, height along the left
   markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y, r2.y + r2.h) + r1.h + 34, fmtIn(layout.m1.w));
@@ -230,67 +294,62 @@ function renderElevation() {
   markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M2</text>`;
 
   svg.innerHTML = markup;
-  svg.querySelector("title").textContent = "Joint elevation view";
+  svg.querySelector("title").textContent = PRINCIPAL_VIEWS[state.viewMode].label;
   svg.querySelector("desc").textContent =
-    `Side view of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
+    `${PRINCIPAL_VIEWS[state.viewMode].label} of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
 }
 
-// ---------- Cross-section view rendering ----------
-function crossSectionSvgMarkup(materialKey, dims, size) {
-  const mat = MATERIAL_TYPES[materialKey];
+// ---------- True cross-section shape rendering (used for End view) ----------
+// naturalSize/scale are computed in the shape's own unrotated orientation,
+// then the whole shape is rotated around the target rect's center — this
+// keeps asymmetric shapes (angle iron, C-channel) genuinely correct under
+// quarter-turn rotation rather than just stretching to fit.
+function trueShapeMarkup(member, rectPx) {
+  const mat = MATERIAL_TYPES[member.material];
   const kind = mat.crossSectionKind;
-  const padding = 30;
-  const vbW = 260, vbH = 200;
-  const scale = Math.min((vbW - padding * 2) / size.w, (vbH - padding * 2) / size.h);
-  const offX = (vbW - size.w * scale) / 2;
-  const offY = (vbH - size.h * scale) / 2;
+  const dims = member.dims;
+  const rotationDeg = member.rotation || 0;
+  const naturalSize = mat.crossSectionSize(dims);
 
-  let shapeMarkup = "";
+  const rotated90 = rotationDeg === 90 || rotationDeg === 270;
+  const boxW = rotated90 ? rectPx.h : rectPx.w;
+  const boxH = rotated90 ? rectPx.w : rectPx.h;
+  const shapeScale = Math.min(boxW / naturalSize.w, boxH / naturalSize.h);
+  const shapeW = naturalSize.w * shapeScale, shapeH = naturalSize.h * shapeScale;
+  const cx = rectPx.x + rectPx.w / 2, cy = rectPx.y + rectPx.h / 2;
+  const offX = cx - shapeW / 2, offY = cy - shapeH / 2;
+
+  let inner = "";
   const circles = crossSectionCircles(kind, dims);
   if (circles) {
-    const cx = offX + size.w * scale / 2, cy = offY + size.h * scale / 2;
-    shapeMarkup += `<circle cx="${cx}" cy="${cy}" r="${circles.outerR * scale}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+    const ccx = offX + shapeW / 2, ccy = offY + shapeH / 2;
+    inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.outerR * shapeScale}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
     if (circles.innerR > 0) {
-      shapeMarkup += `<circle cx="${cx}" cy="${cy}" r="${circles.innerR * scale}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
+      inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.innerR * shapeScale}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
     }
   } else if (kind === "sqtube") {
-    const ow = size.w * scale, oh = size.h * scale;
-    shapeMarkup += `<rect x="${offX}" y="${offY}" width="${ow}" height="${oh}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
-    const wt = dims.wallThick * scale;
-    const iw = Math.max(ow - wt * 2, 0), ih = Math.max(oh - wt * 2, 0);
+    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+    const wt = dims.wallThick * shapeScale;
+    const iw = Math.max(shapeW - wt * 2, 0), ih = Math.max(shapeH - wt * 2, 0);
     if (iw > 0 && ih > 0) {
-      shapeMarkup += `<rect x="${offX + wt}" y="${offY + wt}" width="${iw}" height="${ih}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
+      inner += `<rect x="${offX + wt}" y="${offY + wt}" width="${iw}" height="${ih}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
     }
+  } else if (kind === "rect") {
+    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
   } else {
     const pts = crossSectionPoints(kind, dims);
     if (pts) {
-      const scaled = pts.map(([x, y]) => `${offX + x * scale},${offY + y * scale}`).join(" ");
-      shapeMarkup += `<polygon points="${scaled}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
+      const scaled = pts.map(([x, y]) => `${offX + x * shapeScale},${offY + y * shapeScale}`).join(" ");
+      inner += `<polygon points="${scaled}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
     }
   }
-  return `<svg viewBox="0 0 ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="True cross-section of ${mat.label}">${shapeMarkup}</svg>`;
+
+  if (rotationDeg !== 0) {
+    return `<g transform="rotate(${rotationDeg} ${cx} ${cy})">${inner}</g>`;
+  }
+  return inner;
 }
 function vbBg() { return "#12324F"; }
-
-function renderCrossSections() {
-  const row = $("cross-section-row");
-  row.innerHTML = "";
-  state.members.forEach((member, idx) => {
-    const mat = MATERIAL_TYPES[member.material];
-    if (!mat.crossSectionKind || member.showCrossSection === false) return;
-    const size = mat.crossSectionSize(member.dims);
-    const card = document.createElement("div");
-    card.className = "cross-section-card";
-    const labelDiv = document.createElement("div");
-    labelDiv.className = "cross-section-label";
-    labelDiv.textContent = `Member ${idx + 1} cross-section — ${mat.label}`;
-    card.appendChild(labelDiv);
-    const svgWrap = document.createElement("div");
-    svgWrap.innerHTML = crossSectionSvgMarkup(member.material, member.dims, size);
-    card.appendChild(svgWrap.firstChild);
-    row.appendChild(card);
-  });
-}
 
 // ---------- Description generator ----------
 function renderDescription() {
@@ -312,10 +371,10 @@ $("copy-desc-btn").addEventListener("click", () => {
 
 // ---------- Orchestration ----------
 function render() {
+  renderViewModeGrid();
   renderJointTypeGrid();
   renderMemberEditor();
   renderElevation();
-  renderCrossSections();
   renderDescription();
 }
 
