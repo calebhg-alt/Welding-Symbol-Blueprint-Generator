@@ -177,7 +177,6 @@ function renderMemberEditor() {
       range.value = clamped;
       number.value = clamped;
       renderElevation();
-      renderCrossSections();
       renderDescription();
     }
     range.addEventListener("input", () => applyValue(parseFloat(range.value)));
