@@ -176,9 +176,8 @@
   <div class="sidebar" role="form" aria-label="Joint builder controls">
 
     <fieldset>
-      <legend>Principal view</legend>
-      <div class="joint-type-grid" id="view-mode-grid" role="group" aria-label="Front, top, or end view"></div>
-      <p class="field-hint" style="margin-top:8px;">Choose whichever view best exposes the joint for placing the weld symbol. Front and Top are side views along each member's length; End looks straight down the length at the true cut shape.</p>
+      <legend>Views</legend>
+      <p class="field-hint">All three principal views — Front, Top, and Right Side — render together below, in standard third-angle projection: Top aligns above Front, Right Side aligns beside Front. A member's own length only appears where that view doesn't look straight down it — e.g. a T-joint's upright shows full height in Front and Right Side, but only its cross-section in Top.</p>
     </fieldset>
 
     <fieldset>
@@ -200,7 +199,7 @@
   <div class="main">
     <div class="sheet-wrap">
       <div class="sheet">
-        <svg id="elevation-svg" viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
+        <svg id="elevation-svg" viewBox="0 0 1150 950" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
           <title id="ev-title">Joint view</title>
           <desc id="ev-desc">View of the two members meeting at the selected joint</desc>
         </svg>
