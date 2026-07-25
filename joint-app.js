@@ -27,6 +27,18 @@ const NAVY = "#8FA3C2";
 const NAVY_STROKE = "#E8EEF5";
 const RED_ACCENT = "#F2C744";
 
+// Which member gets rotated 90° to "stand up" in Front view, per joint
+// type — this has to be explicit and shared, because arrangeMembers()
+// (which positions the box) and trueShapeMarkup() (which draws the
+// actual shape inside it) both need to agree on it.
+const ROLE_ROTATION = {
+  tjoint:  { m1: 0, m2: 90 },
+  butt:    { m1: 0, m2: 0 },
+  lap:     { m1: 0, m2: 0 },
+  corner:  { m1: 0, m2: 90 },
+  edge:    { m1: 0, m2: 0 }
+};
+
 function getRotatedCrossSection(member) {
   const raw = MATERIAL_TYPES[member.material].crossSectionSize(member.dims);
   const rot = member.rotation || 0;
@@ -265,11 +277,11 @@ function dimLineV(y1, y2, x, label) {
 function vbBg() { return "#12324F"; }
 
 // ---------- True cross-section shape rendering (Front view only) ----------
-function trueShapeMarkup(member, rectPx) {
+function trueShapeMarkup(member, rectPx, roleRotation) {
   const mat = MATERIAL_TYPES[member.material];
   const kind = mat.crossSectionKind;
   const dims = member.dims;
-  const rotationDeg = member.rotation || 0;
+  const rotationDeg = ((member.rotation || 0) + (roleRotation || 0)) % 360;
   const naturalSize = mat.crossSectionSize(dims);
 
   const rotated90 = rotationDeg === 90 || rotationDeg === 270;
@@ -320,8 +332,9 @@ function renderViewInto(viewKey, layout, originX, originY, scale, useTrueShapes)
 
   let markup = "";
   if (useTrueShapes) {
-    markup += trueShapeMarkup(state.members[0], r1);
-    markup += trueShapeMarkup(state.members[1], r2);
+    const roles = ROLE_ROTATION[state.jointType];
+    markup += trueShapeMarkup(state.members[0], r1, roles.m1);
+    markup += trueShapeMarkup(state.members[1], r2, roles.m2);
   } else {
     // Top/Right: plain extruded silhouettes. M2 is drawn after M1 so it
     // visibly sits on top where the two overlap, matching how the
