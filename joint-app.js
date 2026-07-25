@@ -2,13 +2,29 @@
 // JOINT BUILDER — APPLICATION LOGIC
 //
 // BUILD_STAMP: bump this string with every change shipped. It's shown
-// in the page footer so you can confirm at a glance whether what's
-// live actually matches what was last sent — no console needed.
+// in the page footer, alongside joint-materials.js's own stamp, so a
+// mismatch between the two files (a very common cause of "nothing
+// updated" bugs) is visible on the page itself — no console needed.
 // ============================================================
-const BUILD_STAMP = "2026-07-25-j";
+const BUILD_STAMP = "2026-07-25-k";
 {
   const el = document.getElementById("build-stamp");
   if (el) el.textContent = BUILD_STAMP;
+  const matEl = document.getElementById("materials-build-stamp");
+  if (matEl) {
+    const matStamp = (typeof MATERIALS_BUILD_STAMP !== "undefined") ? MATERIALS_BUILD_STAMP : null;
+    if (!matStamp) {
+      matEl.textContent = "MISSING (joint-materials.js didn't load, or is a very old version)";
+      matEl.style.color = "#F2C744";
+      matEl.style.fontWeight = "700";
+    } else if (matStamp !== BUILD_STAMP) {
+      matEl.textContent = matStamp + " \u2014 MISMATCH with app build " + BUILD_STAMP + ", re-upload both files together";
+      matEl.style.color = "#F2C744";
+      matEl.style.fontWeight = "700";
+    } else {
+      matEl.textContent = matStamp;
+    }
+  }
 }
 // Model (matches Board 2-2's convention and third-angle projection):
 //   FRONT VIEW = the true end-on profile of each member (what you'd
