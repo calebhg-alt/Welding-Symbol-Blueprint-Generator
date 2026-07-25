@@ -4,7 +4,6 @@
 
 const state = {
   jointType: "tjoint",
-  viewMode: "front",
   activeMember: 0,
   members: [
     { material: "flat", dims: defaultDims("flat"), rotation: 0 },
@@ -12,19 +11,84 @@ const state = {
   ]
 };
 
-// Quarter-turn rotation swaps which of a member's two dimensions in
-// the CURRENT principal view reads as "up" vs. "across" — lets you
-// spin a member to place the weld symbol wherever reads best.
-function getEffectiveSize(member) {
-  const mat = MATERIAL_TYPES[member.material];
-  const raw = PRINCIPAL_VIEWS[state.viewMode].size(mat, member.dims);
-  const rot = member.rotation || 0;
-  return (rot === 90 || rot === 270) ? { h: raw.w, w: raw.h } : raw;
-}
-
 const NAVY = "#8FA3C2";
 const NAVY_STROKE = "#E8EEF5";
 const RED_ACCENT = "#F2C744";
+
+// A member's LENGTH is only visible in a view when its length axis
+// isn't the axis that view is looking straight down. When it IS
+// (e.g. a T-joint's upright, viewed from Top, looking down its own
+// length) the member shows only its true cross-section instead of
+// being stretched into a rectangle it doesn't actually look like.
+function getMemberViewGeometry(member, lengthAxis, viewKey) {
+  const mat = MATERIAL_TYPES[member.material];
+  const cs = mat.crossSectionSize(member.dims);
+  const rot = member.rotation || 0;
+  const rotSwap = (rot === 90 || rot === 270);
+  const length = member.dims.length;
+  const hidden = VIEW_HIDDEN_AXIS[viewKey];
+
+  if (lengthAxis === hidden) {
+    let horiz, vert;
+    if (viewKey === "top") { horiz = cs.h; vert = cs.w; } else { horiz = cs.w; vert = cs.h; }
+    if (rotSwap) { const t = horiz; horiz = vert; vert = t; }
+    return { size: { h: vert, w: horiz }, mode: "crosssection" };
+  }
+  if (lengthAxis === "X") {
+    const extent = (viewKey === "front") ? (rotSwap ? cs.w : cs.h) : (rotSwap ? cs.h : cs.w);
+    return { size: { h: extent, w: length }, mode: "elevation" };
+  }
+  const extent = (viewKey === "front") ? (rotSwap ? cs.w : cs.h) : (rotSwap ? cs.h : cs.w);
+  return { size: { h: length, w: extent }, mode: "elevation" };
+}
+
+// ---------- Joint-type-specific positional arrangement (pure geometry) ----------
+function arrangeMembers(jointType, s1, s2) {
+  if (jointType === "tjoint") {
+    const totalW = Math.max(s1.w, s2.h);
+    const totalH = s1.h + s2.w;
+    const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: (totalW - s2.h) / 2, y: 0, w: s2.h, h: s2.w };
+    return { m1, m2, totalW, totalH };
+  }
+  if (jointType === "butt") {
+    const gap = Math.max(s1.w, s2.w) * 0.015;
+    const totalW = s1.w + s2.w + gap;
+    const totalH = Math.max(s1.h, s2.h);
+    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: s1.w + gap, y: totalH - s2.h, w: s2.w, h: s2.h };
+    return { m1, m2, totalW, totalH };
+  }
+  if (jointType === "lap") {
+    const overlap = Math.min(s1.w, s2.w) * 0.4;
+    const totalW = s1.w + s2.w - overlap;
+    const totalH = s1.h + s2.h;
+    const m1 = { x: 0, y: s2.h, w: s1.w, h: s1.h };
+    const m2 = { x: s1.w - overlap, y: 0, w: s2.w, h: s2.h };
+    return { m1, m2, totalW, totalH };
+  }
+  if (jointType === "corner") {
+    const totalW = s1.w;
+    const totalH = s1.h + s2.w;
+    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
+    const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
+    return { m1, m2, totalW, totalH };
+  }
+  // edge — edges sit directly against one another, no gap
+  const totalW = Math.max(s1.w, s2.w);
+  const totalH = s1.h + s2.h;
+  const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
+  const m2 = { x: (totalW - s2.w) / 2, y: 0, w: s2.w, h: s2.h };
+  return { m1, m2, totalW, totalH };
+}
+
+function computeViewLayout(viewKey) {
+  const axes = JOINT_MEMBER_AXES[state.jointType];
+  const g1 = getMemberViewGeometry(state.members[0], axes.m1, viewKey);
+  const g2 = getMemberViewGeometry(state.members[1], axes.m2, viewKey);
+  const layout = arrangeMembers(state.jointType, g1.size, g2.size);
+  return { layout, mode1: g1.mode, mode2: g2.mode };
+}
 
 // ---------- Sentence templates per joint arrangement ----------
 const JOINT_SENTENCE = {
@@ -36,23 +100,6 @@ const JOINT_SENTENCE = {
 };
 
 function $(id) { return document.getElementById(id); }
-
-// ---------- Principal view picker (Front / Top / End) ----------
-function renderViewModeGrid() {
-  const grid = $("view-mode-grid");
-  if (!grid) return;
-  grid.innerHTML = "";
-  Object.keys(PRINCIPAL_VIEWS).forEach(key => {
-    const v = PRINCIPAL_VIEWS[key];
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = state.viewMode === key ? "active" : "";
-    b.textContent = v.label;
-    b.setAttribute("aria-pressed", state.viewMode === key ? "true" : "false");
-    b.addEventListener("click", () => { state.viewMode = key; renderElevation(); renderViewModeGrid(); });
-    grid.appendChild(b);
-  });
-}
 
 // ---------- Joint type picker ----------
 function renderJointTypeGrid() {
@@ -115,7 +162,7 @@ function renderMemberEditor() {
   });
   container.appendChild(select);
 
-  // Orientation — quarter-turn rotation of this member within the elevation view
+  // Orientation — quarter-turn rotation of this member about its own length axis
   const rotateRow = document.createElement("div");
   rotateRow.className = "rotate-row";
   const rotateBtn = document.createElement("button");
@@ -130,7 +177,7 @@ function renderMemberEditor() {
   rotateBtn.addEventListener("click", () => {
     member.rotation = ((member.rotation || 0) + 90) % 360;
     rotateReadout.textContent = "Orientation: " + member.rotation + "\u00B0";
-    renderElevation();
+    renderAllViews();
     renderDescription();
   });
   rotateRow.appendChild(rotateBtn);
@@ -176,7 +223,7 @@ function renderMemberEditor() {
       member.dims[paramKey] = clamped;
       range.value = clamped;
       number.value = clamped;
-      renderElevation();
+      renderAllViews();
       renderDescription();
     }
     range.addEventListener("input", () => applyValue(parseFloat(range.value)));
@@ -194,50 +241,7 @@ function renderMemberEditor() {
   container.appendChild(dimsWrap);
 }
 
-// ---------- Layout math (real-world inches, before scaling) ----------
-function computeLayout() {
-  const s1 = getEffectiveSize(state.members[0]);
-  const s2 = getEffectiveSize(state.members[1]);
-
-  if (state.jointType === "tjoint") {
-    const totalW = Math.max(s1.w, s2.h);
-    const totalH = s1.h + s2.w;
-    const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: (totalW - s2.h) / 2, y: 0, w: s2.h, h: s2.w };
-    return { m1, m2, totalW, totalH };
-  }
-  if (state.jointType === "butt") {
-    const gap = Math.max(s1.w, s2.w) * 0.015;
-    const totalW = s1.w + s2.w + gap;
-    const totalH = Math.max(s1.h, s2.h);
-    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: s1.w + gap, y: totalH - s2.h, w: s2.w, h: s2.h };
-    return { m1, m2, totalW, totalH };
-  }
-  if (state.jointType === "lap") {
-    const overlap = Math.min(s1.w, s2.w) * 0.4;
-    const totalW = s1.w + s2.w - overlap;
-    const totalH = s1.h + s2.h;
-    const m1 = { x: 0, y: s2.h, w: s1.w, h: s1.h };
-    const m2 = { x: s1.w - overlap, y: 0, w: s2.w, h: s2.h };
-    return { m1, m2, totalW, totalH };
-  }
-  if (state.jointType === "corner") {
-    const totalW = s1.w;
-    const totalH = s1.h + s2.w;
-    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
-    return { m1, m2, totalW, totalH };
-  }
-  // edge — edges sit directly against one another, no gap
-  const totalW = Math.max(s1.w, s2.w);
-  const totalH = s1.h + s2.h;
-  const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
-  const m2 = { x: (totalW - s2.w) / 2, y: 0, w: s2.w, h: s2.h };
-  return { m1, m2, totalW, totalH };
-}
-
-// ---------- Elevation view rendering ----------
+// ---------- Dimension callout drawing helpers ----------
 function dimLineH(x1, x2, y, label) {
   return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#9FB2D1" stroke-width="1.5"/>` +
     `<line x1="${x1}" y1="${y-5}" x2="${x1}" y2="${y+5}" stroke="#9FB2D1" stroke-width="1.5"/>` +
@@ -248,57 +252,10 @@ function dimLineV(y1, y2, x, label) {
   return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
     `<line x1="${x-5}" y1="${y1}" x2="${x+5}" y2="${y1}" stroke="#9FB2D1" stroke-width="1.5"/>` +
     `<line x1="${x-5}" y1="${y2}" x2="${x+5}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<text x="${x-8}" y="${(y1+y2)/2}" text-anchor="end" dominant-baseline="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC" transform="rotate(0 ${x-8} ${(y1+y2)/2})">${label}</text>`;
+    `<text x="${x-8}" y="${(y1+y2)/2}" text-anchor="end" dominant-baseline="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC">${label}</text>`;
 }
 
-function renderElevation() {
-  const svg = $("elevation-svg");
-  const layout = computeLayout();
-  const padX = 90, padTop = 60, padBottom = 60;
-  const usableW = 900 - padX * 2;
-  const usableH = 460 - padTop - padBottom;
-  const scale = Math.min(usableW / layout.totalW, usableH / layout.totalH);
-  const offX = padX + (usableW - layout.totalW * scale) / 2;
-  const offY = padTop + (usableH - layout.totalH * scale) / 2;
-
-  function px(rect) {
-    return { x: offX + rect.x * scale, y: offY + rect.y * scale, w: rect.w * scale, h: rect.h * scale };
-  }
-  const r1 = px(layout.m1), r2 = px(layout.m2);
-
-  let markup = "";
-  if (state.viewMode === "end") {
-    markup += trueShapeMarkup(state.members[0], r1);
-    markup += trueShapeMarkup(state.members[1], r2);
-  } else {
-    markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
-    markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
-  }
-
-  // Member 1 dimensions: width along the bottom, height along the left
-  markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y, r2.y + r2.h) + r1.h + 34, fmtIn(layout.m1.w));
-  markup += dimLineV(r1.y, r1.y + r1.h, r1.x - 20, fmtIn(layout.m1.h));
-
-  // Member 2 dimensions: its own length + thickness, placed clear of member 1
-  const m2LengthIsVertical = state.jointType === "tjoint" || state.jointType === "corner";
-  if (m2LengthIsVertical) {
-    markup += dimLineV(r2.y, r2.y + r2.h, r2.x + r2.w + 20, fmtIn(layout.m2.h));
-    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
-  } else {
-    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
-    markup += dimLineV(r2.y, r2.y + r2.h, r2.x - 20, fmtIn(layout.m2.h));
-  }
-
-  markup += `<text x="${r1.x + r1.w/2}" y="${r1.y + r1.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M1</text>`;
-  markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M2</text>`;
-
-  svg.innerHTML = markup;
-  svg.querySelector("title").textContent = PRINCIPAL_VIEWS[state.viewMode].label;
-  svg.querySelector("desc").textContent =
-    `${PRINCIPAL_VIEWS[state.viewMode].label} of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
-}
-
-// ---------- True cross-section shape rendering (used for End view) ----------
+// ---------- True cross-section shape rendering ----------
 // naturalSize/scale are computed in the shape's own unrotated orientation,
 // then the whole shape is rotated around the target rect's center — this
 // keeps asymmetric shapes (angle iron, C-channel) genuinely correct under
@@ -350,6 +307,92 @@ function trueShapeMarkup(member, rectPx) {
 }
 function vbBg() { return "#12324F"; }
 
+// ---------- Render one view's members + dimensions into a given px origin/scale ----------
+function renderViewInto(viewKey, originX, originY, scale) {
+  const { layout, mode1, mode2 } = computeViewLayout(viewKey);
+  function px(rect) {
+    return { x: originX + rect.x * scale, y: originY + rect.y * scale, w: rect.w * scale, h: rect.h * scale };
+  }
+  const r1 = px(layout.m1), r2 = px(layout.m2);
+
+  let markup = "";
+  markup += (mode1 === "crosssection")
+    ? trueShapeMarkup(state.members[0], r1)
+    : `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  markup += (mode2 === "crosssection")
+    ? trueShapeMarkup(state.members[1], r2)
+    : `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+
+  // Dimension callouts: M1 gets width-below / height-left. M2's callout
+  // side is chosen from its own proportions (tall vs. wide) so it reads
+  // sensibly whether it's a full elevation or a small cross-section box.
+  markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y + r1.h, r2.y + r2.h) + 24, fmtIn(layout.m1.w));
+  markup += dimLineV(r1.y, r1.y + r1.h, r1.x - 16, fmtIn(layout.m1.h));
+
+  if (layout.m2.h >= layout.m2.w) {
+    markup += dimLineV(r2.y, r2.y + r2.h, r2.x + r2.w + 16, fmtIn(layout.m2.h));
+    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 12, fmtIn(layout.m2.w));
+  } else {
+    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 12, fmtIn(layout.m2.w));
+    markup += dimLineV(r2.y, r2.y + r2.h, r2.x - 16, fmtIn(layout.m2.h));
+  }
+
+  markup += `<text x="${r1.x + r1.w/2}" y="${r1.y + r1.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="11" fill="#0F1D36">M1</text>`;
+  markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="11" fill="#0F1D36">M2</text>`;
+
+  const bounds = { x: originX, y: originY, w: layout.totalW * scale, h: layout.totalH * scale };
+  return { markup, bounds, layout };
+}
+
+// ---------- Glass-box layout: Top above Front, Right Side beside Front ----------
+function renderAllViews() {
+  const svg = $("elevation-svg");
+  const VB_W = 1150, VB_H = 950;
+  const outerPad = 60, gutter = 60, labelSpace = 30, dimSpace = 60;
+
+  const frontRaw = computeViewLayout("front").layout;
+  const topRaw = computeViewLayout("top").layout;
+  const rightRaw = computeViewLayout("right").layout;
+
+  // Shared column (Front & Top, both measured along the length axis)
+  const colAIn = Math.max(frontRaw.totalW, topRaw.totalW);
+  const colBIn = rightRaw.totalW;
+  // Shared row (Front & Right, both measured along the height axis)
+  const row1In = topRaw.totalH;
+  const row2In = Math.max(frontRaw.totalH, rightRaw.totalH);
+
+  const availW = VB_W - outerPad * 2 - gutter - dimSpace;
+  const availH = VB_H - outerPad * 2 - gutter - labelSpace * 2 - dimSpace;
+  const scale = Math.min(availW / (colAIn + colBIn), availH / (row1In + row2In));
+
+  const colA_x0 = outerPad + dimSpace;
+  const colB_x0 = colA_x0 + colAIn * scale + gutter;
+  const row1_y0 = outerPad + labelSpace;
+  const row2_y0 = row1_y0 + row1In * scale + gutter + labelSpace;
+
+  const front = renderViewInto("front", colA_x0, row2_y0, scale);
+  const top = renderViewInto("top", colA_x0, row1_y0, scale);
+  const right = renderViewInto("right", colB_x0, row2_y0, scale);
+
+  let markup = "";
+  markup += `<text x="${colA_x0}" y="${row1_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">TOP VIEW</text>`;
+  markup += top.markup;
+  markup += `<text x="${colA_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
+  markup += front.markup;
+  markup += `<text x="${colB_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">RIGHT SIDE VIEW</text>`;
+  markup += right.markup;
+
+  // Thin reference lines showing how the views align, like the classic
+  // glass-box unfold — not structural, purely a visual aid.
+  markup += `<line x1="${colA_x0}" y1="${row2_y0}" x2="${colA_x0}" y2="${row1_y0 + row1In*scale}" stroke="#3A5578" stroke-width="1" stroke-dasharray="3 4"/>`;
+  markup += `<line x1="${colA_x0}" y1="${row2_y0}" x2="${colB_x0}" y2="${row2_y0}" stroke="#3A5578" stroke-width="1" stroke-dasharray="3 4"/>`;
+
+  svg.innerHTML = markup;
+  svg.querySelector("title").textContent = "Front, Top, and Right Side views";
+  svg.querySelector("desc").textContent =
+    `Third-angle orthographic views of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
+}
+
 // ---------- Description generator ----------
 function renderDescription() {
   const d1 = MATERIAL_TYPES[state.members[0].material].describe(state.members[0].dims);
@@ -370,10 +413,9 @@ $("copy-desc-btn").addEventListener("click", () => {
 
 // ---------- Orchestration ----------
 function render() {
-  renderViewModeGrid();
   renderJointTypeGrid();
   renderMemberEditor();
-  renderElevation();
+  renderAllViews();
   renderDescription();
 }
 
