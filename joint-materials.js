@@ -1,230 +1,195 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Joint Builder — AVC Welding</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --navy:#1B2A4A;
-    --navy-deep:#0F1D36;
-    --red:#B31B1B;
-    --paper:#F5F6F8;
-    --ink:#1B2A4A;
-    --steel:#5A6B85;
-    --steel-light:#CBD5DC;
-    --control-border:#707B8F;
-    --blueprint:#12324F;
-    --focus:#3A7BD5;
-    --radius:6px;
-  }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;}
-  body{
-    font-family:'IBM Plex Sans', system-ui, sans-serif;
-    background:var(--paper);
-    color:var(--ink);
-    min-height:100vh;
-  }
-  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
-  a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible{
-    outline:3px solid var(--focus); outline-offset:2px;
-  }
+// ============================================================
+// JOINT MATERIALS LIBRARY
+// Parametric structural shapes for the Joint Builder.
+//
+// Every material defines ONE true cross-section (crossSectionSize +
+// crossSectionKind) — what you'd see looking straight down its cut
+// end — plus a length. The three principal views are all derived
+// from that single source of truth, so they can never disagree:
+//
+//   Front view = cross-section HEIGHT  x length
+//   Top view   = cross-section WIDTH   x length
+//   End view   = the true cross-section shape itself, full size
+//
+// This is the same logic Board 2-2 used for Joint 6: the pipe's
+// front view is a plain rectangle (you can't see it's round from the
+// side), but the top view shows the true circle. Every material here
+// works the same way — flat stock and square bar simply have "rect"
+// cross-sections, so Front and Top end up being the same two
+// dimensions in a different arrangement, which is honest, since a
+// prismatic shape really does look the same from the front and the
+// top (only End view reveals whether it's flat vs. square).
+// ============================================================
 
-  .app-header{
-    background:var(--navy); color:white; padding:14px 22px;
-    display:flex; align-items:center; gap:14px;
-    border-bottom:4px solid var(--red);
+const MATERIAL_PARAM_DEFS = {
+  thickness:   { label: "Thickness",        unit: "in", default: 0.5,   min: 0.0625, max: 4,  step: 0.0625 },
+  width:       { label: "Width",            unit: "in", default: 2,     min: 0.25,   max: 24, step: 0.125 },
+  length:      { label: "Length",           unit: "in", default: 4,     min: 0.5,    max: 24, step: 0.125 },
+  legA:        { label: "Leg A Length",     unit: "in", default: 3,     min: 0.5,    max: 12, step: 0.125 },
+  legB:        { label: "Leg B Length",     unit: "in", default: 3,     min: 0.5,    max: 12, step: 0.125 },
+  angleThick:  { label: "Thickness",        unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
+  outerDia:    { label: "Outer Diameter",   unit: "in", default: 2,     min: 0.25,   max: 12, step: 0.125 },
+  wallThick:   { label: "Wall Thickness",   unit: "in", default: 0.188, min: 0.035,  max: 1,  step: 0.0155 },
+  tubeWidth:   { label: "Width",            unit: "in", default: 2,     min: 0.5,    max: 12, step: 0.125 },
+  tubeHeight:  { label: "Height",           unit: "in", default: 2,     min: 0.5,    max: 12, step: 0.125 },
+  depth:       { label: "Depth",            unit: "in", default: 6,     min: 1,      max: 24, step: 0.125 },
+  flangeWidth: { label: "Flange Width",     unit: "in", default: 4,     min: 1,      max: 16, step: 0.125 },
+  flangeThick: { label: "Flange Thickness", unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
+  webThick:    { label: "Web Thickness",    unit: "in", default: 0.25,  min: 0.0625, max: 2,  step: 0.0625 },
+  barDia:      { label: "Diameter",         unit: "in", default: 1,     min: 0.125,  max: 6,  step: 0.0625 },
+  barSide:     { label: "Side",             unit: "in", default: 1,     min: 0.125,  max: 6,  step: 0.0625 }
+};
+
+// crossSectionKind "rect" = a plain rectangle (fully honest — nothing
+// hidden by drawing it as a box). Every other kind gets a true-shape
+// End view since a rectangle would misrepresent it.
+const MATERIAL_TYPES = {
+  flat: {
+    label: "Flat Stock", group: "Flat Stock",
+    params: ["thickness", "width", "length"],
+    crossSectionKind: "rect",
+    crossSectionSize: d => ({ h: d.thickness, w: d.width }),
+    describe: d => `a flat plate ${fmtIn(d.thickness)} thick, ${fmtIn(d.width)} wide, and ${fmtIn(d.length)} long`
+  },
+  angle: {
+    label: "Angle Iron (L-Shape)", group: "Angle Iron",
+    params: ["legA", "legB", "angleThick", "length"],
+    crossSectionKind: "angle",
+    crossSectionSize: d => ({ h: d.legA, w: d.legB }),
+    describe: d => `an angle iron with a ${fmtIn(d.legA)} leg and a ${fmtIn(d.legB)} leg, ${fmtIn(d.angleThick)} thick, ${fmtIn(d.length)} long`
+  },
+  roundtube: {
+    label: "Round Tube / Pipe", group: "Tube / Pipe",
+    params: ["outerDia", "wallThick", "length"],
+    crossSectionKind: "roundtube",
+    crossSectionSize: d => ({ h: d.outerDia, w: d.outerDia }),
+    describe: d => `a round tube with a ${fmtIn(d.outerDia)} outer diameter, ${fmtIn(d.wallThick)} wall thickness, and ${fmtIn(d.length)} length`
+  },
+  sqtube: {
+    label: "Square / Rectangular Tube", group: "Tube / Pipe",
+    params: ["tubeWidth", "tubeHeight", "wallThick", "length"],
+    crossSectionKind: "sqtube",
+    crossSectionSize: d => ({ h: d.tubeHeight, w: d.tubeWidth }),
+    describe: d => `a rectangular tube ${fmtIn(d.tubeWidth)} by ${fmtIn(d.tubeHeight)}, ${fmtIn(d.wallThick)} wall thickness, ${fmtIn(d.length)} long`
+  },
+  cchannel: {
+    label: "C-Channel", group: "C-Channel",
+    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
+    crossSectionKind: "cchannel",
+    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
+    describe: d => `a C-channel ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
+  },
+  ibeam: {
+    label: "I-Beam (W-Shape)", group: "I-Beam",
+    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
+    crossSectionKind: "ibeam",
+    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
+    describe: d => `a wide-flange I-beam (W-shape) ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
+  },
+  sbeam: {
+    label: "S-Beam (Standard I-Shape)", group: "Structural Steel",
+    params: ["depth", "flangeWidth", "flangeThick", "webThick", "length"],
+    crossSectionKind: "sbeam",
+    crossSectionSize: d => ({ h: d.depth, w: d.flangeWidth }),
+    describe: d => `a standard I-beam (S-shape) ${fmtIn(d.depth)} deep with ${fmtIn(d.flangeWidth)} flanges, ${fmtIn(d.length)} long`
+  },
+  roundbar: {
+    label: "Round Bar", group: "Structural Steel",
+    params: ["barDia", "length"],
+    crossSectionKind: "roundbar",
+    crossSectionSize: d => ({ h: d.barDia, w: d.barDia }),
+    describe: d => `a round solid bar ${fmtIn(d.barDia)} in diameter and ${fmtIn(d.length)} long`
+  },
+  squarebar: {
+    label: "Square Bar", group: "Structural Steel",
+    params: ["barSide", "length"],
+    crossSectionKind: "rect",
+    crossSectionSize: d => ({ h: d.barSide, w: d.barSide }),
+    describe: d => `a square solid bar ${fmtIn(d.barSide)} in per side and ${fmtIn(d.length)} long`
   }
-  .header-titles{display:flex; flex-direction:column; line-height:1.15;}
-  .header-eyebrow{font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; color:#C9D2E0; text-transform:uppercase;}
-  .header-title{font-family:'IBM Plex Sans Condensed', sans-serif; font-weight:700; font-size:20px;}
+};
 
-  .layout{
-    display:grid;
-    grid-template-columns:380px 1fr;
-    min-height:calc(100vh - 64px);
+const MATERIAL_GROUPS = ["Flat Stock", "Angle Iron", "Tube / Pipe", "C-Channel", "I-Beam", "Structural Steel"];
+
+// Derived views — every material gets all three automatically from
+// its cross-section + length. Nothing material-specific needed here.
+const PRINCIPAL_VIEWS = {
+  front: { label: "Front View", size: (mat, d) => ({ h: mat.crossSectionSize(d).h, w: d.length }) },
+  top:   { label: "Top View",   size: (mat, d) => ({ h: mat.crossSectionSize(d).w, w: d.length }) },
+  end:   { label: "End View",   size: (mat, d) => mat.crossSectionSize(d) }
+};
+
+const JOINT_ARRANGEMENTS = {
+  tjoint:  { label: "T-Joint",   desc: "Member 2 stands perpendicular on top of Member 1, forming a T." },
+  butt:    { label: "Butt Joint", desc: "Members meet edge to edge in the same plane." },
+  lap:     { label: "Lap Joint",  desc: "Members overlap, one above the other." },
+  corner:  { label: "Corner Joint", desc: "Members meet at a right-angle corner, like the corner of a frame." },
+  edge:    { label: "Edge Joint", desc: "Members sit directly on top of one another, edges aligned." }
+};
+
+function fmtIn(n) {
+  const r = Math.round(n * 10000) / 10000;
+  return `${r}"`;
+}
+
+function defaultDims(materialKey) {
+  const mat = MATERIAL_TYPES[materialKey];
+  const d = {};
+  mat.params.forEach(p => { d[p] = MATERIAL_PARAM_DEFS[p].default; });
+  return d;
+}
+
+// ---------- Cross-section (End view) path builders ----------
+// All coordinates are in real-world inches, origin at the shape's own
+// top-left bounding corner. joint-app.js scales + translates into place.
+
+function crossSectionPoints(kind, d) {
+  switch (kind) {
+    case "rect":
+      return null; // drawn as a plain rect directly by the renderer
+    case "angle": {
+      const t = d.angleThick;
+      return [[0,0],[t,0],[t,d.legA-t],[d.legB,d.legA-t],[d.legB,d.legA],[0,d.legA]];
+    }
+    case "sqtube":
+      return null; // drawn specially (outer rect + inner rect) by the renderer
+    case "cchannel": {
+      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
+      return [[0,0],[fw,0],[fw,ft],[wt,ft],[wt,dep-ft],[fw,dep-ft],[fw,dep],[0,dep]];
+    }
+    case "ibeam": {
+      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
+      const cx1 = (fw - wt) / 2, cx2 = (fw + wt) / 2;
+      return [
+        [0,0],[fw,0],[fw,ft],[cx2,ft],[cx2,dep-ft],[fw,dep-ft],[fw,dep],[0,dep],
+        [0,dep-ft],[cx1,dep-ft],[cx1,ft],[0,ft]
+      ];
+    }
+    case "sbeam": {
+      // Same envelope as an I-beam but with tapered (sloped) flange
+      // faces on the inside — the visual cue that distinguishes an
+      // S-shape (American Standard) from a W-shape (wide-flange).
+      const fw = d.flangeWidth, dep = d.depth, ft = d.flangeThick, wt = d.webThick;
+      const taper = Math.min(fw * 0.18, ft * 1.4);
+      const cx1 = (fw - wt) / 2, cx2 = (fw + wt) / 2;
+      return [
+        [0,0],[fw,0],[fw,ft],[cx2+taper,ft],[cx2,dep-ft],[fw,dep-ft],[fw,dep],[0,dep],
+        [0,dep-ft],[cx1,dep-ft],[cx1-taper,ft],[0,ft]
+      ];
+    }
+    default:
+      return null;
   }
-  @media (max-width:960px){ .layout{grid-template-columns:1fr;} }
+}
 
-  .sidebar{
-    background:white;
-    border-right:1px solid var(--steel-light);
-    padding:18px;
-    overflow-y:auto;
+function crossSectionCircles(kind, d) {
+  if (kind === "roundtube") {
+    const r = d.outerDia / 2;
+    const inner = Math.max(r - d.wallThick, 0);
+    return { outerR: r, innerR: inner };
   }
-  .main{
-    padding:22px;
-    display:flex;
-    flex-direction:column;
-    gap:18px;
-    align-items:center;
+  if (kind === "roundbar") {
+    return { outerR: d.barDia / 2, innerR: 0 };
   }
-
-  fieldset{border:1.5px solid var(--steel-light); border-radius:8px; padding:14px; margin:0 0 16px 0;}
-  legend{
-    font-family:'IBM Plex Sans Condensed', sans-serif;
-    font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.06em;
-    color:var(--navy); padding:0 6px;
-  }
-  .field-group{margin-bottom:12px;}
-  .field-group label{
-    display:flex; justify-content:space-between;
-    font-size:13px; font-weight:500; color:var(--ink); margin-bottom:5px;
-  }
-  .field-group .field-value{font-family:'IBM Plex Mono', monospace; color:var(--red); font-weight:600;}
-  .number-input-row{display:flex; align-items:center; gap:8px;}
-  .number-input-row input[type="range"]{flex:2;}
-  .number-input-row input[type="number"]{flex:1; min-width:0;}
-  .unit-suffix{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel); min-width:14px;}
-  .rotate-row{display:flex; align-items:center; gap:10px; margin:4px 0 14px;}
-  .btn-rotate{
-    padding:8px 14px; border-radius:6px; border:1.5px solid var(--control-border);
-    background:white; color:var(--navy); font-weight:600; font-size:13px; cursor:pointer;
-    display:flex; align-items:center; gap:6px;
-  }
-  .btn-rotate:hover{border-color:var(--red); color:var(--red);}
-  .rotate-readout{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel);}
-  select, input[type="text"], input[type="number"]{
-    width:100%; padding:8px 9px;
-    border:1.5px solid var(--control-border); border-radius:5px;
-    font-family:'IBM Plex Sans', sans-serif; font-size:13.5px;
-    background:white; color:var(--ink);
-  }
-  input[type="range"]{width:100%; accent-color:var(--red);}
-  .field-hint{font-size:11.5px; color:var(--steel); margin-top:3px; line-height:1.4;}
-
-  .member-tabs{display:flex; gap:6px; margin-bottom:14px;}
-  .member-tabs button{
-    flex:1; padding:9px 6px; border-radius:6px;
-    border:1.5px solid var(--control-border); background:white; color:var(--steel);
-    font-family:'IBM Plex Sans', sans-serif; font-weight:600; font-size:13px; cursor:pointer;
-  }
-  .member-tabs button.active{background:var(--navy); color:white; border-color:var(--navy);}
-  .member-tabs button:not(.active):hover{background:var(--paper);}
-
-  .joint-type-grid{
-    display:grid; grid-template-columns:1fr 1fr; gap:8px;
-  }
-  .joint-type-grid button{
-    border:1.5px solid var(--control-border); background:white; border-radius:6px;
-    padding:9px 8px; font-family:'IBM Plex Sans', sans-serif; font-size:12.5px; font-weight:500;
-    color:var(--ink); cursor:pointer; text-align:left; line-height:1.25;
-  }
-  .joint-type-grid button:hover{border-color:var(--navy);}
-  .joint-type-grid button.active{border-color:var(--red); background:#FBEDEC; color:var(--red); font-weight:600;}
-
-  .checkbox-row{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--steel); margin:10px 0 0 0; cursor:pointer;}
-  .checkbox-row input{accent-color:var(--red);}
-
-  .sheet-wrap{width:100%; max-width:960px;}
-  .sheet{
-    width:100%; background:var(--blueprint); border-radius:8px;
-    box-shadow:0 10px 30px rgba(15,29,54,0.25); overflow:hidden;
-  }
-  .sheet svg{display:block; width:100%; height:auto;}
-  .cross-section-row{display:flex; gap:14px; margin-top:14px; flex-wrap:wrap;}
-  .cross-section-card{
-    flex:1; min-width:220px;
-    background:var(--blueprint); border-radius:8px;
-    box-shadow:0 6px 18px rgba(15,29,54,0.2); overflow:hidden;
-  }
-  .cross-section-card svg{display:block; width:100%; height:auto;}
-  .cross-section-label{
-    background:var(--navy-deep); color:#D9E1EC;
-    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.05em;
-    padding:8px 12px; text-transform:uppercase;
-  }
-
-  .desc-panel{
-    width:100%; max-width:960px;
-    background:white; border:1px solid var(--steel-light); border-radius:8px; padding:16px 18px;
-  }
-  .desc-panel h2{
-    font-family:'IBM Plex Sans Condensed', sans-serif; font-size:15px; color:var(--navy);
-    margin:0 0 10px; display:flex; justify-content:space-between; align-items:center;
-  }
-  .desc-text{
-    font-size:13.5px; line-height:1.6; color:var(--ink);
-    background:var(--paper); border-radius:6px; padding:12px 14px;
-  }
-  .btn-copy{
-    padding:8px 14px; border-radius:6px; border:1.5px solid var(--navy);
-    background:var(--navy); color:white; font-weight:600; font-size:12.5px; cursor:pointer;
-  }
-  .btn-copy:hover{background:#12213D;}
-  .copy-status{font-size:12px; color:var(--steel); margin-left:10px;}
-
-  .disclaimer{font-size:11px; color:var(--steel); text-align:center; line-height:1.5; max-width:960px;}
-  .attribution{display:block; margin-top:6px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:var(--steel); opacity:0.85;}
-</style>
-</head>
-<body>
-
-<h1 class="sr-only">Antelope Valley College Joint Builder — build parametric structural joints from real material dimensions</h1>
-
-<div class="app-header" role="banner">
-  <div class="header-titles">
-    <span class="header-eyebrow">AVC · CTE Welding</span>
-    <span class="header-title">Joint Builder</span>
-  </div>
-</div>
-
-<div class="layout">
-  <div class="sidebar" role="form" aria-label="Joint builder controls">
-
-    <fieldset>
-      <legend>Principal view</legend>
-      <div class="joint-type-grid" id="view-mode-grid" role="group" aria-label="Front, top, or end view"></div>
-      <p class="field-hint" style="margin-top:8px;">Choose whichever view best exposes the joint for placing the weld symbol. Front and Top are side views along each member's length; End looks straight down the length at the true cut shape.</p>
-    </fieldset>
-
-    <fieldset>
-      <legend>Joint arrangement</legend>
-      <div class="joint-type-grid" id="joint-type-grid" role="group" aria-label="Joint type"></div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Members</legend>
-      <div class="member-tabs" role="tablist" aria-label="Which member to edit">
-        <button id="tab-member-0" role="tab" aria-selected="true" onclick="selectMember(0)">Member 1</button>
-        <button id="tab-member-1" role="tab" aria-selected="false" onclick="selectMember(1)">Member 2</button>
-      </div>
-      <div id="member-editor"></div>
-    </fieldset>
-
-  </div>
-
-  <div class="main">
-    <div class="sheet-wrap">
-      <div class="sheet">
-        <svg id="elevation-svg" viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
-          <title id="ev-title">Joint view</title>
-          <desc id="ev-desc">View of the two members meeting at the selected joint</desc>
-        </svg>
-      </div>
-    </div>
-
-    <div class="desc-panel">
-      <h2>Joint description <span></span></h2>
-      <p class="field-hint" style="margin:-6px 0 10px;">Plain-language description of the joint geometry, generated from the dimensions above. Ready to paste as the opening paragraph in Blueprint Viewer — add the "Weld Symbol:" portion from Symbol Builder separately.</p>
-      <div class="desc-text" id="desc-text"></div>
-      <div style="margin-top:10px;">
-        <button type="button" class="btn-copy" id="copy-desc-btn">Copy description</button>
-        <span class="copy-status" id="copy-status" role="status" aria-live="polite"></span>
-      </div>
-    </div>
-
-    <p class="disclaimer">
-      Educational use only. Simplified for instructional clarity — shape proportions are representative, not mill-certified.
-      <span class="attribution">Built by Caleb Healey — AVC CTE Welding</span>
-    </p>
-  </div>
-</div>
-
-<script src="joint-materials.js"></script>
-<script src="joint-app.js"></script>
-</body>
-</html>
+  return null;
+}
