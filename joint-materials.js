@@ -25,7 +25,7 @@
 // checked independently of joint-app.js's stamp — the two files have
 // to be uploaded together, and a mismatch between them is a common
 // source of "nothing updated" bugs that are otherwise hard to spot.
-const MATERIALS_BUILD_STAMP = "2026-07-25-k";
+const MATERIALS_BUILD_STAMP = "2026-07-25-l";
 
 const MATERIAL_PARAM_DEFS = {
   thickness:   { label: "Thickness",        unit: "in", default: 0.5,   min: 0.0625, max: 4,  step: 0.0625 },
