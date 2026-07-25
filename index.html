@@ -80,6 +80,35 @@
   .number-input-row input[type="number"]{flex:1; min-width:0;}
   .unit-suffix{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel); min-width:14px;}
   .rotate-row{display:flex; align-items:center; gap:10px; margin:4px 0 14px;}
+
+  .nudge-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 34px);
+    grid-template-rows:repeat(3, 34px);
+    gap:4px;
+    margin:8px 0;
+  }
+  .nudge-grid button{
+    border:1.5px solid var(--control-border);
+    background:white;
+    border-radius:5px;
+    font-size:14px;
+    cursor:pointer;
+    color:var(--navy);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .nudge-grid button:hover{border-color:var(--red); color:var(--red);}
+  .nudge-up{grid-column:2; grid-row:1;}
+  .nudge-left{grid-column:1; grid-row:2;}
+  .nudge-center{grid-column:2; grid-row:2; border-style:dashed !important; cursor:default; color:var(--steel) !important;}
+  .nudge-right{grid-column:3; grid-row:2;}
+  .nudge-down{grid-column:2; grid-row:3;}
+  .position-readout{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    color:var(--steel);
+    margin:6px 0 12px;
+  }
   .btn-rotate{
     padding:8px 14px; border-radius:6px; border:1.5px solid var(--control-border);
     background:white; color:var(--navy); font-weight:600; font-size:13px; cursor:pointer;
@@ -178,11 +207,13 @@
     <fieldset>
       <legend>Views</legend>
       <p class="field-hint">All three principal views — Front, Top, and Right Side — render together below, in standard third-angle projection: Top aligns above Front, Right Side aligns beside Front. A member's own length only appears where that view doesn't look straight down it — e.g. a T-joint's upright shows full height in Front and Right Side, but only its cross-section in Top.</p>
+      <button type="button" class="btn-rotate" id="toggle-principal-views" aria-pressed="true" style="width:100%;justify-content:center;margin-top:8px;">Top &amp; Right Side views: On</button>
     </fieldset>
 
     <fieldset>
       <legend>Joint arrangement</legend>
       <div class="joint-type-grid" id="joint-type-grid" role="group" aria-label="Joint type"></div>
+      <div id="attach-offset-wrap"></div>
     </fieldset>
 
     <fieldset>
@@ -191,6 +222,7 @@
         <button id="tab-member-0" role="tab" aria-selected="true" onclick="selectMember(0)">Member 1</button>
         <button id="tab-member-1" role="tab" aria-selected="false" onclick="selectMember(1)">Member 2</button>
       </div>
+      <button type="button" class="btn-rotate" id="reset-positions-btn" style="width:100%;justify-content:center;margin-bottom:12px;">&#8634; Reset both members' positions</button>
       <div id="member-editor"></div>
     </fieldset>
 
@@ -218,7 +250,7 @@
 
     <p class="disclaimer">
       Educational use only. Simplified for instructional clarity — shape proportions are representative, not mill-certified.
-      <span class="attribution">Built by Caleb Healey — AVC CTE Welding</span>
+      <span class="attribution">Built by Caleb Healey — AVC CTE Welding &middot; build <span id="build-stamp"></span></span>
     </p>
   </div>
 </div>
