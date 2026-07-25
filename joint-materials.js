@@ -1,381 +1,230 @@
-// ============================================================
-// JOINT BUILDER — APPLICATION LOGIC
-// ============================================================
-
-const state = {
-  jointType: "tjoint",
-  viewMode: "front",
-  activeMember: 0,
-  members: [
-    { material: "flat", dims: defaultDims("flat"), rotation: 0 },
-    { material: "flat", dims: defaultDims("flat"), rotation: 0 }
-  ]
-};
-
-// Quarter-turn rotation swaps which of a member's two dimensions in
-// the CURRENT principal view reads as "up" vs. "across" — lets you
-// spin a member to place the weld symbol wherever reads best.
-function getEffectiveSize(member) {
-  const mat = MATERIAL_TYPES[member.material];
-  const raw = PRINCIPAL_VIEWS[state.viewMode].size(mat, member.dims);
-  const rot = member.rotation || 0;
-  return (rot === 90 || rot === 270) ? { h: raw.w, w: raw.h } : raw;
-}
-
-const NAVY = "#8FA3C2";
-const NAVY_STROKE = "#E8EEF5";
-const RED_ACCENT = "#F2C744";
-
-// ---------- Sentence templates per joint arrangement ----------
-const JOINT_SENTENCE = {
-  tjoint: (d1, d2) => `T-joint formed by ${d2} welded perpendicular to ${d1}.`,
-  butt:   (d1, d2) => `Butt joint formed by ${d1} and ${d2}, joined edge to edge in the same plane.`,
-  lap:    (d1, d2) => `Lap joint formed by ${d1} overlapping ${d2}.`,
-  corner: (d1, d2) => `Corner joint formed by ${d1} and ${d2}, meeting at a right-angle corner.`,
-  edge:   (d1, d2) => `Edge joint formed by ${d1} and ${d2}, stacked with edges aligned.`
-};
-
-function $(id) { return document.getElementById(id); }
-
-// ---------- Principal view picker (Front / Top / End) ----------
-function renderViewModeGrid() {
-  const grid = $("view-mode-grid");
-  if (!grid) return;
-  grid.innerHTML = "";
-  Object.keys(PRINCIPAL_VIEWS).forEach(key => {
-    const v = PRINCIPAL_VIEWS[key];
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = state.viewMode === key ? "active" : "";
-    b.textContent = v.label;
-    b.setAttribute("aria-pressed", state.viewMode === key ? "true" : "false");
-    b.addEventListener("click", () => { state.viewMode = key; renderElevation(); renderViewModeGrid(); });
-    grid.appendChild(b);
-  });
-}
-
-// ---------- Joint type picker ----------
-function renderJointTypeGrid() {
-  const grid = $("joint-type-grid");
-  grid.innerHTML = "";
-  Object.keys(JOINT_ARRANGEMENTS).forEach(key => {
-    const j = JOINT_ARRANGEMENTS[key];
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = state.jointType === key ? "active" : "";
-    b.textContent = j.label;
-    b.setAttribute("aria-pressed", state.jointType === key ? "true" : "false");
-    b.addEventListener("click", () => { state.jointType = key; render(); });
-    grid.appendChild(b);
-  });
-}
-
-// ---------- Member tabs ----------
-function selectMember(i) {
-  state.activeMember = i;
-  render();
-}
-
-// ---------- Member editor (material + dimension fields) ----------
-function renderMemberEditor() {
-  $("tab-member-0").classList.toggle("active", state.activeMember === 0);
-  $("tab-member-0").setAttribute("aria-selected", state.activeMember === 0 ? "true" : "false");
-  $("tab-member-1").classList.toggle("active", state.activeMember === 1);
-  $("tab-member-1").setAttribute("aria-selected", state.activeMember === 1 ? "true" : "false");
-
-  const member = state.members[state.activeMember];
-  const container = $("member-editor");
-  container.innerHTML = "";
-
-  const matLabel = document.createElement("label");
-  matLabel.setAttribute("for", "material-select");
-  matLabel.textContent = "Material type";
-  matLabel.style.cssText = "display:block;font-size:13px;font-weight:600;margin-bottom:5px;";
-  container.appendChild(matLabel);
-
-  const select = document.createElement("select");
-  select.id = "material-select";
-  MATERIAL_GROUPS.forEach(group => {
-    const optgroup = document.createElement("optgroup");
-    optgroup.label = group;
-    Object.keys(MATERIAL_TYPES).filter(k => MATERIAL_TYPES[k].group === group).forEach(key => {
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = MATERIAL_TYPES[key].label;
-      if (key === member.material) opt.selected = true;
-      optgroup.appendChild(opt);
-    });
-    select.appendChild(optgroup);
-  });
-  select.addEventListener("change", () => {
-    member.material = select.value;
-    member.dims = defaultDims(select.value);
-    member.rotation = 0;
-    render();
-  });
-  container.appendChild(select);
-
-  // Orientation — quarter-turn rotation of this member within the elevation view
-  const rotateRow = document.createElement("div");
-  rotateRow.className = "rotate-row";
-  const rotateBtn = document.createElement("button");
-  rotateBtn.type = "button";
-  rotateBtn.className = "btn-rotate";
-  rotateBtn.innerHTML = "&#8635; Rotate 90&deg;";
-  rotateBtn.setAttribute("aria-label", "Rotate this member a quarter turn");
-  const rotateReadout = document.createElement("span");
-  rotateReadout.className = "rotate-readout";
-  rotateReadout.id = "rotate-readout";
-  rotateReadout.textContent = "Orientation: " + (member.rotation || 0) + "\u00B0";
-  rotateBtn.addEventListener("click", () => {
-    member.rotation = ((member.rotation || 0) + 90) % 360;
-    rotateReadout.textContent = "Orientation: " + member.rotation + "\u00B0";
-    renderElevation();
-    renderDescription();
-  });
-  rotateRow.appendChild(rotateBtn);
-  rotateRow.appendChild(rotateReadout);
-  container.appendChild(rotateRow);
-
-  const dimsWrap = document.createElement("div");
-  dimsWrap.style.marginTop = "14px";
-  const mat = MATERIAL_TYPES[member.material];
-  mat.params.forEach(paramKey => {
-    const def = MATERIAL_PARAM_DEFS[paramKey];
-    const group = document.createElement("div");
-    group.className = "field-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "dim-range-" + paramKey);
-    label.textContent = def.label;
-    group.appendChild(label);
-
-    const row = document.createElement("div");
-    row.className = "number-input-row";
-
-    const range = document.createElement("input");
-    range.type = "range";
-    range.id = "dim-range-" + paramKey;
-    range.min = def.min; range.max = def.max; range.step = def.step;
-    range.value = member.dims[paramKey];
-
-    const number = document.createElement("input");
-    number.type = "number";
-    number.id = "dim-num-" + paramKey;
-    number.min = def.min; number.max = def.max; number.step = def.step;
-    number.value = member.dims[paramKey];
-    number.setAttribute("aria-label", def.label + " in inches, type an exact value");
-
-    const unit = document.createElement("span");
-    unit.className = "unit-suffix";
-    unit.setAttribute("aria-hidden", "true");
-    unit.textContent = def.unit || "";
-
-    function applyValue(v) {
-      const clamped = Math.min(def.max, Math.max(def.min, v));
-      member.dims[paramKey] = clamped;
-      range.value = clamped;
-      number.value = clamped;
-      renderElevation();
-      renderCrossSections();
-      renderDescription();
-    }
-    range.addEventListener("input", () => applyValue(parseFloat(range.value)));
-    number.addEventListener("change", () => {
-      const v = parseFloat(number.value);
-      applyValue(isNaN(v) ? def.default : v);
-    });
-
-    row.appendChild(range);
-    row.appendChild(number);
-    row.appendChild(unit);
-    group.appendChild(row);
-    dimsWrap.appendChild(group);
-  });
-  container.appendChild(dimsWrap);
-}
-
-// ---------- Layout math (real-world inches, before scaling) ----------
-function computeLayout() {
-  const s1 = getEffectiveSize(state.members[0]);
-  const s2 = getEffectiveSize(state.members[1]);
-
-  if (state.jointType === "tjoint") {
-    const totalW = Math.max(s1.w, s2.h);
-    const totalH = s1.h + s2.w;
-    const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: (totalW - s2.h) / 2, y: 0, w: s2.h, h: s2.w };
-    return { m1, m2, totalW, totalH };
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Joint Builder — AVC Welding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#1B2A4A;
+    --navy-deep:#0F1D36;
+    --red:#B31B1B;
+    --paper:#F5F6F8;
+    --ink:#1B2A4A;
+    --steel:#5A6B85;
+    --steel-light:#CBD5DC;
+    --control-border:#707B8F;
+    --blueprint:#12324F;
+    --focus:#3A7BD5;
+    --radius:6px;
   }
-  if (state.jointType === "butt") {
-    const gap = Math.max(s1.w, s2.w) * 0.015;
-    const totalW = s1.w + s2.w + gap;
-    const totalH = Math.max(s1.h, s2.h);
-    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: s1.w + gap, y: totalH - s2.h, w: s2.w, h: s2.h };
-    return { m1, m2, totalW, totalH };
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
   }
-  if (state.jointType === "lap") {
-    const overlap = Math.min(s1.w, s2.w) * 0.4;
-    const totalW = s1.w + s2.w - overlap;
-    const totalH = s1.h + s2.h;
-    const m1 = { x: 0, y: s2.h, w: s1.w, h: s1.h };
-    const m2 = { x: s1.w - overlap, y: 0, w: s2.w, h: s2.h };
-    return { m1, m2, totalW, totalH };
-  }
-  if (state.jointType === "corner") {
-    const totalW = s1.w;
-    const totalH = s1.h + s2.w;
-    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
-    const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
-    return { m1, m2, totalW, totalH };
-  }
-  // edge — edges sit directly against one another, no gap
-  const totalW = Math.max(s1.w, s2.w);
-  const totalH = s1.h + s2.h;
-  const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
-  const m2 = { x: (totalW - s2.w) / 2, y: 0, w: s2.w, h: s2.h };
-  return { m1, m2, totalW, totalH };
-}
-
-// ---------- Elevation view rendering ----------
-function dimLineH(x1, x2, y, label) {
-  return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<line x1="${x1}" y1="${y-5}" x2="${x1}" y2="${y+5}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<line x1="${x2}" y1="${y-5}" x2="${x2}" y2="${y+5}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<text x="${(x1+x2)/2}" y="${y-8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC">${label}</text>`;
-}
-function dimLineV(y1, y2, x, label) {
-  return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<line x1="${x-5}" y1="${y1}" x2="${x+5}" y2="${y1}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<line x1="${x-5}" y1="${y2}" x2="${x+5}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
-    `<text x="${x-8}" y="${(y1+y2)/2}" text-anchor="end" dominant-baseline="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC" transform="rotate(0 ${x-8} ${(y1+y2)/2})">${label}</text>`;
-}
-
-function renderElevation() {
-  const svg = $("elevation-svg");
-  const layout = computeLayout();
-  const padX = 90, padTop = 60, padBottom = 60;
-  const usableW = 900 - padX * 2;
-  const usableH = 460 - padTop - padBottom;
-  const scale = Math.min(usableW / layout.totalW, usableH / layout.totalH);
-  const offX = padX + (usableW - layout.totalW * scale) / 2;
-  const offY = padTop + (usableH - layout.totalH * scale) / 2;
-
-  function px(rect) {
-    return { x: offX + rect.x * scale, y: offY + rect.y * scale, w: rect.w * scale, h: rect.h * scale };
-  }
-  const r1 = px(layout.m1), r2 = px(layout.m2);
-
-  let markup = "";
-  if (state.viewMode === "end") {
-    markup += trueShapeMarkup(state.members[0], r1);
-    markup += trueShapeMarkup(state.members[1], r2);
-  } else {
-    markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
-    markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible{
+    outline:3px solid var(--focus); outline-offset:2px;
   }
 
-  // Member 1 dimensions: width along the bottom, height along the left
-  markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y, r2.y + r2.h) + r1.h + 34, fmtIn(layout.m1.w));
-  markup += dimLineV(r1.y, r1.y + r1.h, r1.x - 20, fmtIn(layout.m1.h));
+  .app-header{
+    background:var(--navy); color:white; padding:14px 22px;
+    display:flex; align-items:center; gap:14px;
+    border-bottom:4px solid var(--red);
+  }
+  .header-titles{display:flex; flex-direction:column; line-height:1.15;}
+  .header-eyebrow{font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; color:#C9D2E0; text-transform:uppercase;}
+  .header-title{font-family:'IBM Plex Sans Condensed', sans-serif; font-weight:700; font-size:20px;}
 
-  // Member 2 dimensions: its own length + thickness, placed clear of member 1
-  const m2LengthIsVertical = state.jointType === "tjoint" || state.jointType === "corner";
-  if (m2LengthIsVertical) {
-    markup += dimLineV(r2.y, r2.y + r2.h, r2.x + r2.w + 20, fmtIn(layout.m2.h));
-    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
-  } else {
-    markup += dimLineH(r2.x, r2.x + r2.w, r2.y - 16, fmtIn(layout.m2.w));
-    markup += dimLineV(r2.y, r2.y + r2.h, r2.x - 20, fmtIn(layout.m2.h));
+  .layout{
+    display:grid;
+    grid-template-columns:380px 1fr;
+    min-height:calc(100vh - 64px);
+  }
+  @media (max-width:960px){ .layout{grid-template-columns:1fr;} }
+
+  .sidebar{
+    background:white;
+    border-right:1px solid var(--steel-light);
+    padding:18px;
+    overflow-y:auto;
+  }
+  .main{
+    padding:22px;
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    align-items:center;
   }
 
-  markup += `<text x="${r1.x + r1.w/2}" y="${r1.y + r1.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M1</text>`;
-  markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="12" fill="#0F1D36">M2</text>`;
+  fieldset{border:1.5px solid var(--steel-light); border-radius:8px; padding:14px; margin:0 0 16px 0;}
+  legend{
+    font-family:'IBM Plex Sans Condensed', sans-serif;
+    font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:0.06em;
+    color:var(--navy); padding:0 6px;
+  }
+  .field-group{margin-bottom:12px;}
+  .field-group label{
+    display:flex; justify-content:space-between;
+    font-size:13px; font-weight:500; color:var(--ink); margin-bottom:5px;
+  }
+  .field-group .field-value{font-family:'IBM Plex Mono', monospace; color:var(--red); font-weight:600;}
+  .number-input-row{display:flex; align-items:center; gap:8px;}
+  .number-input-row input[type="range"]{flex:2;}
+  .number-input-row input[type="number"]{flex:1; min-width:0;}
+  .unit-suffix{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel); min-width:14px;}
+  .rotate-row{display:flex; align-items:center; gap:10px; margin:4px 0 14px;}
+  .btn-rotate{
+    padding:8px 14px; border-radius:6px; border:1.5px solid var(--control-border);
+    background:white; color:var(--navy); font-weight:600; font-size:13px; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+  }
+  .btn-rotate:hover{border-color:var(--red); color:var(--red);}
+  .rotate-readout{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--steel);}
+  select, input[type="text"], input[type="number"]{
+    width:100%; padding:8px 9px;
+    border:1.5px solid var(--control-border); border-radius:5px;
+    font-family:'IBM Plex Sans', sans-serif; font-size:13.5px;
+    background:white; color:var(--ink);
+  }
+  input[type="range"]{width:100%; accent-color:var(--red);}
+  .field-hint{font-size:11.5px; color:var(--steel); margin-top:3px; line-height:1.4;}
 
-  svg.innerHTML = markup;
-  svg.querySelector("title").textContent = PRINCIPAL_VIEWS[state.viewMode].label;
-  svg.querySelector("desc").textContent =
-    `${PRINCIPAL_VIEWS[state.viewMode].label} of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
-}
+  .member-tabs{display:flex; gap:6px; margin-bottom:14px;}
+  .member-tabs button{
+    flex:1; padding:9px 6px; border-radius:6px;
+    border:1.5px solid var(--control-border); background:white; color:var(--steel);
+    font-family:'IBM Plex Sans', sans-serif; font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .member-tabs button.active{background:var(--navy); color:white; border-color:var(--navy);}
+  .member-tabs button:not(.active):hover{background:var(--paper);}
 
-// ---------- True cross-section shape rendering (used for End view) ----------
-// naturalSize/scale are computed in the shape's own unrotated orientation,
-// then the whole shape is rotated around the target rect's center — this
-// keeps asymmetric shapes (angle iron, C-channel) genuinely correct under
-// quarter-turn rotation rather than just stretching to fit.
-function trueShapeMarkup(member, rectPx) {
-  const mat = MATERIAL_TYPES[member.material];
-  const kind = mat.crossSectionKind;
-  const dims = member.dims;
-  const rotationDeg = member.rotation || 0;
-  const naturalSize = mat.crossSectionSize(dims);
+  .joint-type-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+  }
+  .joint-type-grid button{
+    border:1.5px solid var(--control-border); background:white; border-radius:6px;
+    padding:9px 8px; font-family:'IBM Plex Sans', sans-serif; font-size:12.5px; font-weight:500;
+    color:var(--ink); cursor:pointer; text-align:left; line-height:1.25;
+  }
+  .joint-type-grid button:hover{border-color:var(--navy);}
+  .joint-type-grid button.active{border-color:var(--red); background:#FBEDEC; color:var(--red); font-weight:600;}
 
-  const rotated90 = rotationDeg === 90 || rotationDeg === 270;
-  const boxW = rotated90 ? rectPx.h : rectPx.w;
-  const boxH = rotated90 ? rectPx.w : rectPx.h;
-  const shapeScale = Math.min(boxW / naturalSize.w, boxH / naturalSize.h);
-  const shapeW = naturalSize.w * shapeScale, shapeH = naturalSize.h * shapeScale;
-  const cx = rectPx.x + rectPx.w / 2, cy = rectPx.y + rectPx.h / 2;
-  const offX = cx - shapeW / 2, offY = cy - shapeH / 2;
+  .checkbox-row{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--steel); margin:10px 0 0 0; cursor:pointer;}
+  .checkbox-row input{accent-color:var(--red);}
 
-  let inner = "";
-  const circles = crossSectionCircles(kind, dims);
-  if (circles) {
-    const ccx = offX + shapeW / 2, ccy = offY + shapeH / 2;
-    inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.outerR * shapeScale}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
-    if (circles.innerR > 0) {
-      inner += `<circle cx="${ccx}" cy="${ccy}" r="${circles.innerR * shapeScale}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
-    }
-  } else if (kind === "sqtube") {
-    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
-    const wt = dims.wallThick * shapeScale;
-    const iw = Math.max(shapeW - wt * 2, 0), ih = Math.max(shapeH - wt * 2, 0);
-    if (iw > 0 && ih > 0) {
-      inner += `<rect x="${offX + wt}" y="${offY + wt}" width="${iw}" height="${ih}" fill="${vbBg()}" stroke="${NAVY_STROKE}" stroke-width="1.5"/>`;
-    }
-  } else if (kind === "rect") {
-    inner += `<rect x="${offX}" y="${offY}" width="${shapeW}" height="${shapeH}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
-  } else {
-    const pts = crossSectionPoints(kind, dims);
-    if (pts) {
-      const scaled = pts.map(([x, y]) => `${offX + x * shapeScale},${offY + y * shapeScale}`).join(" ");
-      inner += `<polygon points="${scaled}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2"/>`;
-    }
+  .sheet-wrap{width:100%; max-width:960px;}
+  .sheet{
+    width:100%; background:var(--blueprint); border-radius:8px;
+    box-shadow:0 10px 30px rgba(15,29,54,0.25); overflow:hidden;
+  }
+  .sheet svg{display:block; width:100%; height:auto;}
+  .cross-section-row{display:flex; gap:14px; margin-top:14px; flex-wrap:wrap;}
+  .cross-section-card{
+    flex:1; min-width:220px;
+    background:var(--blueprint); border-radius:8px;
+    box-shadow:0 6px 18px rgba(15,29,54,0.2); overflow:hidden;
+  }
+  .cross-section-card svg{display:block; width:100%; height:auto;}
+  .cross-section-label{
+    background:var(--navy-deep); color:#D9E1EC;
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.05em;
+    padding:8px 12px; text-transform:uppercase;
   }
 
-  if (rotationDeg !== 0) {
-    return `<g transform="rotate(${rotationDeg} ${cx} ${cy})">${inner}</g>`;
+  .desc-panel{
+    width:100%; max-width:960px;
+    background:white; border:1px solid var(--steel-light); border-radius:8px; padding:16px 18px;
   }
-  return inner;
-}
-function vbBg() { return "#12324F"; }
+  .desc-panel h2{
+    font-family:'IBM Plex Sans Condensed', sans-serif; font-size:15px; color:var(--navy);
+    margin:0 0 10px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .desc-text{
+    font-size:13.5px; line-height:1.6; color:var(--ink);
+    background:var(--paper); border-radius:6px; padding:12px 14px;
+  }
+  .btn-copy{
+    padding:8px 14px; border-radius:6px; border:1.5px solid var(--navy);
+    background:var(--navy); color:white; font-weight:600; font-size:12.5px; cursor:pointer;
+  }
+  .btn-copy:hover{background:#12213D;}
+  .copy-status{font-size:12px; color:var(--steel); margin-left:10px;}
 
-// ---------- Description generator ----------
-function renderDescription() {
-  const d1 = MATERIAL_TYPES[state.members[0].material].describe(state.members[0].dims);
-  const d2 = MATERIAL_TYPES[state.members[1].material].describe(state.members[1].dims);
-  const sentence = JOINT_SENTENCE[state.jointType](d1, d2);
-  $("desc-text").textContent = sentence;
-}
+  .disclaimer{font-size:11px; color:var(--steel); text-align:center; line-height:1.5; max-width:960px;}
+  .attribution{display:block; margin-top:6px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:var(--steel); opacity:0.85;}
+</style>
+</head>
+<body>
 
-$("copy-desc-btn").addEventListener("click", () => {
-  const text = $("desc-text").textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    $("copy-status").textContent = "Copied.";
-    setTimeout(() => { $("copy-status").textContent = ""; }, 2500);
-  }).catch(() => {
-    $("copy-status").textContent = "Could not copy — select and copy the text manually.";
-  });
-});
+<h1 class="sr-only">Antelope Valley College Joint Builder — build parametric structural joints from real material dimensions</h1>
 
-// ---------- Orchestration ----------
-function render() {
-  renderViewModeGrid();
-  renderJointTypeGrid();
-  renderMemberEditor();
-  renderElevation();
-  renderDescription();
-}
+<div class="app-header" role="banner">
+  <div class="header-titles">
+    <span class="header-eyebrow">AVC · CTE Welding</span>
+    <span class="header-title">Joint Builder</span>
+  </div>
+</div>
 
-render();
+<div class="layout">
+  <div class="sidebar" role="form" aria-label="Joint builder controls">
+
+    <fieldset>
+      <legend>Principal view</legend>
+      <div class="joint-type-grid" id="view-mode-grid" role="group" aria-label="Front, top, or end view"></div>
+      <p class="field-hint" style="margin-top:8px;">Choose whichever view best exposes the joint for placing the weld symbol. Front and Top are side views along each member's length; End looks straight down the length at the true cut shape.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Joint arrangement</legend>
+      <div class="joint-type-grid" id="joint-type-grid" role="group" aria-label="Joint type"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Members</legend>
+      <div class="member-tabs" role="tablist" aria-label="Which member to edit">
+        <button id="tab-member-0" role="tab" aria-selected="true" onclick="selectMember(0)">Member 1</button>
+        <button id="tab-member-1" role="tab" aria-selected="false" onclick="selectMember(1)">Member 2</button>
+      </div>
+      <div id="member-editor"></div>
+    </fieldset>
+
+  </div>
+
+  <div class="main">
+    <div class="sheet-wrap">
+      <div class="sheet">
+        <svg id="elevation-svg" viewBox="0 0 900 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ev-title ev-desc">
+          <title id="ev-title">Joint view</title>
+          <desc id="ev-desc">View of the two members meeting at the selected joint</desc>
+        </svg>
+      </div>
+    </div>
+
+    <div class="desc-panel">
+      <h2>Joint description <span></span></h2>
+      <p class="field-hint" style="margin:-6px 0 10px;">Plain-language description of the joint geometry, generated from the dimensions above. Ready to paste as the opening paragraph in Blueprint Viewer — add the "Weld Symbol:" portion from Symbol Builder separately.</p>
+      <div class="desc-text" id="desc-text"></div>
+      <div style="margin-top:10px;">
+        <button type="button" class="btn-copy" id="copy-desc-btn">Copy description</button>
+        <span class="copy-status" id="copy-status" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+
+    <p class="disclaimer">
+      Educational use only. Simplified for instructional clarity — shape proportions are representative, not mill-certified.
+      <span class="attribution">Built by Caleb Healey — AVC CTE Welding</span>
+    </p>
+  </div>
+</div>
+
+<script src="joint-materials.js"></script>
+<script src="joint-app.js"></script>
+</body>
+</html>
