@@ -6,7 +6,7 @@
 // mismatch between the two files (a very common cause of "nothing
 // updated" bugs) is visible on the page itself — no console needed.
 // ============================================================
-const BUILD_STAMP = "2026-07-25-k";
+const BUILD_STAMP = "2026-07-25-l";
 {
   const el = document.getElementById("build-stamp");
   if (el) el.textContent = BUILD_STAMP;
@@ -566,12 +566,12 @@ function renderAllViewsInner() {
     const x0 = outerPad + dimSpace + (availW - frontL.totalW * scale) / 2;
     const y0 = outerPad + labelSpace + (availH - frontL.totalH * scale) / 2;
 
-    let markup = `<text x="${x0}" y="${y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
+    const titleText = "Front view";
+    const descText = `Front view of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}. Top and Right Side views are currently hidden.`;
+    let markup = `<title>${escapeXml(titleText)}</title><desc>${escapeXml(descText)}</desc>`;
+    markup += `<text x="${x0}" y="${y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
     markup += renderViewInto("front", frontL, x0, y0, scale, true);
     svg.innerHTML = markup;
-    svg.querySelector("title").textContent = "Front view";
-    svg.querySelector("desc").textContent =
-      `Front view of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}. Top and Right Side views are currently hidden.`;
     return;
   }
 
@@ -602,6 +602,9 @@ function renderAllViewsInner() {
   const lines2 = computeInternalLines(state.members[1], roles.m2, frontR2);
 
   let markup = "";
+  const titleText = "Front, Top, and Right Side views";
+  const descText = `Third-angle orthographic views of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
+  markup += `<title>${escapeXml(titleText)}</title><desc>${escapeXml(descText)}</desc>`;
   markup += `<text x="${colA_x0}" y="${row1_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">TOP VIEW</text>`;
   markup += renderViewInto("top", topL, colA_x0, row1_y0, scale, false,
     { verticalX: lines1.verticalX }, { verticalX: lines2.verticalX });
@@ -617,9 +620,10 @@ function renderAllViewsInner() {
   markup += `<line x1="${colA_x0}" y1="${row2_y0}" x2="${colB_x0}" y2="${row2_y0}" stroke="#3A5578" stroke-width="1" stroke-dasharray="3 4"/>`;
 
   svg.innerHTML = markup;
-  svg.querySelector("title").textContent = "Front, Top, and Right Side views";
-  svg.querySelector("desc").textContent =
-    `Third-angle orthographic views of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
+}
+
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ---------- Description generator ----------
