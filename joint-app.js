@@ -5,7 +5,7 @@
 // in the page footer so you can confirm at a glance whether what's
 // live actually matches what was last sent — no console needed.
 // ============================================================
-const BUILD_STAMP = "2026-07-25-h";
+const BUILD_STAMP = "2026-07-25-j";
 {
   const el = document.getElementById("build-stamp");
   if (el) el.textContent = BUILD_STAMP;
@@ -26,7 +26,6 @@ const BUILD_STAMP = "2026-07-25-h";
 const state = {
   jointType: "tjoint",
   activeMember: 0,
-  attachOffset: 0,
   showPrincipalViews: true,
   members: [
     { material: "flat", dims: defaultDims("flat"), rotation: 0, offsetX: 0, offsetY: 0 },
@@ -57,18 +56,13 @@ function getRotatedCrossSection(member) {
 }
 
 // ---------- Front view arrangement (pure profile, no length) ----------
-// attachOffset: how far the upright member (M2) sinks down into M1's
-// silhouette instead of always sitting at the very top of it — needed
-// for shapes like an I-beam where the actual weld-able surface (the
-// web) isn't at the top of the bounding box.
-function arrangeMembers(jointType, s1, s2, attachOffset) {
-  const offset = attachOffset || 0;
+function arrangeMembers(jointType, s1, s2) {
   if (jointType === "tjoint") {
     const totalW = Math.max(s1.w, s2.h);
-    const effTotalH = s1.h + s2.w - offset;
-    const m1 = { x: (totalW - s1.w) / 2, y: effTotalH - s1.h, w: s1.w, h: s1.h };
+    const totalH = s1.h + s2.w;
+    const m1 = { x: (totalW - s1.w) / 2, y: totalH - s1.h, w: s1.w, h: s1.h };
     const m2 = { x: (totalW - s2.h) / 2, y: 0, w: s2.h, h: s2.w };
-    return { m1, m2, totalW, totalH: effTotalH };
+    return { m1, m2, totalW, totalH };
   }
   if (jointType === "butt") {
     const gap = Math.max(s1.w, s2.w) * 0.015;
@@ -87,11 +81,11 @@ function arrangeMembers(jointType, s1, s2, attachOffset) {
     return { m1, m2, totalW, totalH };
   }
   if (jointType === "corner") {
-    const effTotalH = s1.h + s2.w - offset;
     const totalW = s1.w;
-    const m1 = { x: 0, y: effTotalH - s1.h, w: s1.w, h: s1.h };
+    const totalH = s1.h + s2.w;
+    const m1 = { x: 0, y: totalH - s1.h, w: s1.w, h: s1.h };
     const m2 = { x: Math.max(0, s1.w - s2.h), y: 0, w: Math.min(s2.h, s1.w), h: s2.w };
-    return { m1, m2, totalW, totalH: effTotalH };
+    return { m1, m2, totalW, totalH };
   }
   // edge — edges sit directly against one another, no gap
   const totalW = Math.max(s1.w, s2.w);
@@ -104,10 +98,7 @@ function arrangeMembers(jointType, s1, s2, attachOffset) {
 function computeFrontLayout() {
   const s1 = getRotatedCrossSection(state.members[0]);
   const s2 = getRotatedCrossSection(state.members[1]);
-  const attach = (state.jointType === "tjoint" || state.jointType === "corner")
-    ? Math.min(state.attachOffset || 0, s2.w * 0.9, s1.h * 0.9)
-    : 0;
-  const layout = arrangeMembers(state.jointType, s1, s2, attach);
+  const layout = arrangeMembers(state.jointType, s1, s2);
 
   // Manual nudge, applied on top of the automatic arrangement. Members
   // can be pushed anywhere, including negative territory, so the whole
@@ -170,71 +161,9 @@ function renderJointTypeGrid() {
     b.className = state.jointType === key ? "active" : "";
     b.textContent = j.label;
     b.setAttribute("aria-pressed", state.jointType === key ? "true" : "false");
-    b.addEventListener("click", () => { state.jointType = key; state.attachOffset = 0; render(); });
+    b.addEventListener("click", () => { state.jointType = key; render(); });
     grid.appendChild(b);
   });
-  renderAttachOffset();
-}
-
-// Only meaningful for T-joint and Corner, where Member 2 stacks on top
-// of Member 1 — lets it sink down to rest on an internal feature (like
-// an I-beam's web) instead of always sitting at the very top edge.
-function renderAttachOffset() {
-  const wrap = $("attach-offset-wrap");
-  if (!wrap) return;
-  wrap.innerHTML = "";
-  if (state.jointType !== "tjoint" && state.jointType !== "corner") return;
-
-  const s1 = getRotatedCrossSection(state.members[0]);
-  const s2 = getRotatedCrossSection(state.members[1]);
-  const maxOffset = Math.round(Math.min(s2.w * 0.9, s1.h * 0.9) * 1000) / 1000;
-  state.attachOffset = Math.min(state.attachOffset || 0, maxOffset);
-
-  const group = document.createElement("div");
-  group.className = "field-group";
-  group.style.marginTop = "12px";
-  const label = document.createElement("label");
-  label.setAttribute("for", "attach-offset-range");
-  label.textContent = "Member 2 attachment depth";
-  group.appendChild(label);
-  const hint = document.createElement("p");
-  hint.className = "field-hint";
-  hint.style.margin = "2px 0 8px";
-  hint.textContent = "How far Member 2 sinks down to rest on an internal surface (like an I-beam's web) instead of the very top edge.";
-  group.appendChild(hint);
-
-  const row = document.createElement("div");
-  row.className = "number-input-row";
-  const range = document.createElement("input");
-  range.type = "range";
-  range.id = "attach-offset-range";
-  range.min = 0; range.max = maxOffset || 0.01; range.step = 0.0625;
-  range.value = state.attachOffset;
-  const number = document.createElement("input");
-  number.type = "number";
-  number.min = 0; number.max = maxOffset || 0.01; number.step = 0.0625;
-  number.value = state.attachOffset;
-  number.setAttribute("aria-label", "Attachment depth in inches");
-  const unit = document.createElement("span");
-  unit.className = "unit-suffix";
-  unit.textContent = "in";
-
-  function apply(v) {
-    const clamped = Math.min(maxOffset, Math.max(0, v));
-    state.attachOffset = clamped;
-    range.value = clamped;
-    number.value = clamped;
-    renderAllViews();
-    renderDescription();
-  }
-  range.addEventListener("input", () => apply(parseFloat(range.value)));
-  number.addEventListener("change", () => apply(isNaN(parseFloat(number.value)) ? 0 : parseFloat(number.value)));
-
-  row.appendChild(range);
-  row.appendChild(number);
-  row.appendChild(unit);
-  group.appendChild(row);
-  wrap.appendChild(group);
 }
 
 // ---------- Member tabs ----------
@@ -364,7 +293,7 @@ function renderMemberEditor() {
 }
 
 // Manual left/right/up/down nudge on top of the automatic joint
-// arrangement — independent of rotation and attachment depth. Position
+// arrangement — independent of rotation. Position
 // is stored in Front view's coordinate frame (X = horizontal, Y =
 // vertical, positive Y is downward) and propagates into Top (via X)
 // and Right Side (via Y) automatically since those views derive their
@@ -595,6 +524,18 @@ function renderViewInto(viewKey, layout, originX, originY, scale, useTrueShapes,
 
 // ---------- Glass-box layout: Top above Front, Right Side beside Front ----------
 function renderAllViews() {
+  try {
+    renderAllViewsInner();
+  } catch (err) {
+    console.error("renderAllViews failed:", err);
+    const svg = $("elevation-svg");
+    svg.innerHTML =
+      `<text x="60" y="80" font-family="IBM Plex Mono, monospace" font-size="16" fill="${RED_ACCENT}">Rendering error — check the browser console (F12) for details.</text>` +
+      `<text x="60" y="110" font-family="IBM Plex Mono, monospace" font-size="13" fill="#D9E1EC">${String(err && err.message ? err.message : err).replace(/[<>&]/g, "")}</text>`;
+  }
+}
+
+function renderAllViewsInner() {
   const svg = $("elevation-svg");
   const VB_W = 1150, VB_H = 950;
   const outerPad = 60, gutter = 60, labelSpace = 30, dimSpace = 60;
@@ -611,7 +552,6 @@ function renderAllViews() {
 
     let markup = `<text x="${x0}" y="${y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
     markup += renderViewInto("front", frontL, x0, y0, scale, true);
-    markup += movementIndicatorMarkup(frontL, x0, y0, scale);
     svg.innerHTML = markup;
     svg.querySelector("title").textContent = "Front view";
     svg.querySelector("desc").textContent =
@@ -651,7 +591,6 @@ function renderAllViews() {
     { verticalX: lines1.verticalX }, { verticalX: lines2.verticalX });
   markup += `<text x="${colA_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
   markup += renderViewInto("front", frontL, colA_x0, row2_y0, scale, true);
-  markup += movementIndicatorMarkup(frontL, colA_x0, row2_y0, scale);
   markup += `<text x="${colB_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">RIGHT SIDE VIEW</text>`;
   markup += renderViewInto("right", rightL, colB_x0, row2_y0, scale, false,
     { horizontalY: lines1.horizontalY }, { horizontalY: lines2.horizontalY });
@@ -665,22 +604,6 @@ function renderAllViews() {
   svg.querySelector("title").textContent = "Front, Top, and Right Side views";
   svg.querySelector("desc").textContent =
     `Third-angle orthographic views of Member 1 (${MATERIAL_TYPES[state.members[0].material].label}) and Member 2 (${MATERIAL_TYPES[state.members[1].material].label}) in a ${JOINT_ARRANGEMENTS[state.jointType].label}.`;
-}
-
-// Small "moved X in" label near any member that's been manually nudged,
-// shown in Front view (the one view where nudging is visually direct).
-function movementIndicatorMarkup(frontL, originX, originY, scale) {
-  let markup = "";
-  [frontL.m1, frontL.m2].forEach((rect, idx) => {
-    const member = state.members[idx];
-    const ox = member.offsetX || 0, oy = member.offsetY || 0;
-    const dist = Math.sqrt(ox * ox + oy * oy);
-    if (dist < 0.001) return;
-    const px = originX + (rect.x + rect.w) * scale + 6;
-    const py = originY + rect.y * scale - 6;
-    markup += `<text x="${px}" y="${py}" font-family="IBM Plex Mono, monospace" font-size="11" fill="${RED_ACCENT}">M${idx+1} moved ${fmtIn(dist)}</text>`;
-  });
-  return markup;
 }
 
 // ---------- Description generator ----------
