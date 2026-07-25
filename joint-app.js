@@ -1,5 +1,17 @@
 // ============================================================
 // JOINT BUILDER — APPLICATION LOGIC
+//
+// Model (matches Board 2-2's convention and third-angle projection):
+//   FRONT VIEW = the true end-on profile of each member (what you'd
+//     see looking straight down its length) — a circle for tube, an
+//     L for angle iron, a plain rectangle for flat stock — arranged
+//     per joint type. Length never appears here.
+//   TOP VIEW    = each member's Front silhouette (x position, width)
+//     extruded downward by ITS OWN length.
+//   RIGHT VIEW  = each member's Front silhouette (y position, height)
+//     extruded rightward by ITS OWN length.
+// Rotating a member spins its true shape in Front view; Top/Right
+// automatically inherit whatever footprint that rotation produces.
 // ============================================================
 
 const state = {
@@ -15,34 +27,13 @@ const NAVY = "#8FA3C2";
 const NAVY_STROKE = "#E8EEF5";
 const RED_ACCENT = "#F2C744";
 
-// A member's LENGTH is only visible in a view when its length axis
-// isn't the axis that view is looking straight down. When it IS
-// (e.g. a T-joint's upright, viewed from Top, looking down its own
-// length) the member shows only its true cross-section instead of
-// being stretched into a rectangle it doesn't actually look like.
-function getMemberViewGeometry(member, lengthAxis, viewKey) {
-  const mat = MATERIAL_TYPES[member.material];
-  const cs = mat.crossSectionSize(member.dims);
+function getRotatedCrossSection(member) {
+  const raw = MATERIAL_TYPES[member.material].crossSectionSize(member.dims);
   const rot = member.rotation || 0;
-  const rotSwap = (rot === 90 || rot === 270);
-  const length = member.dims.length;
-  const hidden = VIEW_HIDDEN_AXIS[viewKey];
-
-  if (lengthAxis === hidden) {
-    let horiz, vert;
-    if (viewKey === "top") { horiz = cs.h; vert = cs.w; } else { horiz = cs.w; vert = cs.h; }
-    if (rotSwap) { const t = horiz; horiz = vert; vert = t; }
-    return { size: { h: vert, w: horiz }, mode: "crosssection" };
-  }
-  if (lengthAxis === "X") {
-    const extent = (viewKey === "front") ? (rotSwap ? cs.w : cs.h) : (rotSwap ? cs.h : cs.w);
-    return { size: { h: extent, w: length }, mode: "elevation" };
-  }
-  const extent = (viewKey === "front") ? (rotSwap ? cs.w : cs.h) : (rotSwap ? cs.h : cs.w);
-  return { size: { h: length, w: extent }, mode: "elevation" };
+  return (rot === 90 || rot === 270) ? { h: raw.w, w: raw.h } : raw;
 }
 
-// ---------- Joint-type-specific positional arrangement (pure geometry) ----------
+// ---------- Front view arrangement (pure profile, no length) ----------
 function arrangeMembers(jointType, s1, s2) {
   if (jointType === "tjoint") {
     const totalW = Math.max(s1.w, s2.h);
@@ -82,12 +73,29 @@ function arrangeMembers(jointType, s1, s2) {
   return { m1, m2, totalW, totalH };
 }
 
-function computeViewLayout(viewKey) {
-  const axes = JOINT_MEMBER_AXES[state.jointType];
-  const g1 = getMemberViewGeometry(state.members[0], axes.m1, viewKey);
-  const g2 = getMemberViewGeometry(state.members[1], axes.m2, viewKey);
-  const layout = arrangeMembers(state.jointType, g1.size, g2.size);
-  return { layout, mode1: g1.mode, mode2: g2.mode };
+function computeFrontLayout() {
+  const s1 = getRotatedCrossSection(state.members[0]);
+  const s2 = getRotatedCrossSection(state.members[1]);
+  return arrangeMembers(state.jointType, s1, s2);
+}
+
+// Top/Right are directly derived from Front — same x/w (Top) or y/h
+// (Right), each member's own length filling the other axis.
+function computeTopLayout() {
+  const front = computeFrontLayout();
+  const len1 = state.members[0].dims.length;
+  const len2 = state.members[1].dims.length;
+  const m1 = { x: front.m1.x, w: front.m1.w, y: 0, h: len1 };
+  const m2 = { x: front.m2.x, w: front.m2.w, y: 0, h: len2 };
+  return { m1, m2, totalW: front.totalW, totalH: Math.max(len1, len2) };
+}
+function computeRightLayout() {
+  const front = computeFrontLayout();
+  const len1 = state.members[0].dims.length;
+  const len2 = state.members[1].dims.length;
+  const m1 = { y: front.m1.y, h: front.m1.h, x: 0, w: len1 };
+  const m2 = { y: front.m2.y, h: front.m2.h, x: 0, w: len2 };
+  return { m1, m2, totalW: Math.max(len1, len2), totalH: front.totalH };
 }
 
 // ---------- Sentence templates per joint arrangement ----------
@@ -254,12 +262,9 @@ function dimLineV(y1, y2, x, label) {
     `<line x1="${x-5}" y1="${y2}" x2="${x+5}" y2="${y2}" stroke="#9FB2D1" stroke-width="1.5"/>` +
     `<text x="${x-8}" y="${(y1+y2)/2}" text-anchor="end" dominant-baseline="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="#D9E1EC">${label}</text>`;
 }
+function vbBg() { return "#12324F"; }
 
-// ---------- True cross-section shape rendering ----------
-// naturalSize/scale are computed in the shape's own unrotated orientation,
-// then the whole shape is rotated around the target rect's center — this
-// keeps asymmetric shapes (angle iron, C-channel) genuinely correct under
-// quarter-turn rotation rather than just stretching to fit.
+// ---------- True cross-section shape rendering (Front view only) ----------
 function trueShapeMarkup(member, rectPx) {
   const mat = MATERIAL_TYPES[member.material];
   const kind = mat.crossSectionKind;
@@ -305,27 +310,26 @@ function trueShapeMarkup(member, rectPx) {
   }
   return inner;
 }
-function vbBg() { return "#12324F"; }
 
-// ---------- Render one view's members + dimensions into a given px origin/scale ----------
-function renderViewInto(viewKey, originX, originY, scale) {
-  const { layout, mode1, mode2 } = computeViewLayout(viewKey);
+// ---------- Render one view into a given px origin/scale ----------
+function renderViewInto(viewKey, layout, originX, originY, scale, useTrueShapes) {
   function px(rect) {
     return { x: originX + rect.x * scale, y: originY + rect.y * scale, w: rect.w * scale, h: rect.h * scale };
   }
   const r1 = px(layout.m1), r2 = px(layout.m2);
 
   let markup = "";
-  markup += (mode1 === "crosssection")
-    ? trueShapeMarkup(state.members[0], r1)
-    : `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
-  markup += (mode2 === "crosssection")
-    ? trueShapeMarkup(state.members[1], r2)
-    : `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+  if (useTrueShapes) {
+    markup += trueShapeMarkup(state.members[0], r1);
+    markup += trueShapeMarkup(state.members[1], r2);
+  } else {
+    // Top/Right: plain extruded silhouettes. M2 is drawn after M1 so it
+    // visibly sits on top where the two overlap, matching how the
+    // upright member would actually occlude the base from above/beside.
+    markup += `<rect x="${r1.x}" y="${r1.y}" width="${r1.w}" height="${r1.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.9"/>`;
+    markup += `<rect x="${r2.x}" y="${r2.y}" width="${r2.w}" height="${r2.h}" fill="${NAVY}" stroke="${NAVY_STROKE}" stroke-width="2" opacity="0.95"/>`;
+  }
 
-  // Dimension callouts: M1 gets width-below / height-left. M2's callout
-  // side is chosen from its own proportions (tall vs. wide) so it reads
-  // sensibly whether it's a full elevation or a small cross-section box.
   markup += dimLineH(r1.x, r1.x + r1.w, Math.max(r1.y + r1.h, r2.y + r2.h) + 24, fmtIn(layout.m1.w));
   markup += dimLineV(r1.y, r1.y + r1.h, r1.x - 16, fmtIn(layout.m1.h));
 
@@ -340,8 +344,7 @@ function renderViewInto(viewKey, originX, originY, scale) {
   markup += `<text x="${r1.x + r1.w/2}" y="${r1.y + r1.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="11" fill="#0F1D36">M1</text>`;
   markup += `<text x="${r2.x + r2.w/2}" y="${r2.y + r2.h/2 + 4}" text-anchor="middle" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="600" font-size="11" fill="#0F1D36">M2</text>`;
 
-  const bounds = { x: originX, y: originY, w: layout.totalW * scale, h: layout.totalH * scale };
-  return { markup, bounds, layout };
+  return markup;
 }
 
 // ---------- Glass-box layout: Top above Front, Right Side beside Front ----------
@@ -350,16 +353,14 @@ function renderAllViews() {
   const VB_W = 1150, VB_H = 950;
   const outerPad = 60, gutter = 60, labelSpace = 30, dimSpace = 60;
 
-  const frontRaw = computeViewLayout("front").layout;
-  const topRaw = computeViewLayout("top").layout;
-  const rightRaw = computeViewLayout("right").layout;
+  const frontL = computeFrontLayout();
+  const topL = computeTopLayout();
+  const rightL = computeRightLayout();
 
-  // Shared column (Front & Top, both measured along the length axis)
-  const colAIn = Math.max(frontRaw.totalW, topRaw.totalW);
-  const colBIn = rightRaw.totalW;
-  // Shared row (Front & Right, both measured along the height axis)
-  const row1In = topRaw.totalH;
-  const row2In = Math.max(frontRaw.totalH, rightRaw.totalH);
+  const colAIn = Math.max(frontL.totalW, topL.totalW);
+  const colBIn = rightL.totalW;
+  const row1In = topL.totalH;
+  const row2In = Math.max(frontL.totalH, rightL.totalH);
 
   const availW = VB_W - outerPad * 2 - gutter - dimSpace;
   const availH = VB_H - outerPad * 2 - gutter - labelSpace * 2 - dimSpace;
@@ -370,17 +371,13 @@ function renderAllViews() {
   const row1_y0 = outerPad + labelSpace;
   const row2_y0 = row1_y0 + row1In * scale + gutter + labelSpace;
 
-  const front = renderViewInto("front", colA_x0, row2_y0, scale);
-  const top = renderViewInto("top", colA_x0, row1_y0, scale);
-  const right = renderViewInto("right", colB_x0, row2_y0, scale);
-
   let markup = "";
   markup += `<text x="${colA_x0}" y="${row1_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">TOP VIEW</text>`;
-  markup += top.markup;
+  markup += renderViewInto("top", topL, colA_x0, row1_y0, scale, false);
   markup += `<text x="${colA_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">FRONT VIEW</text>`;
-  markup += front.markup;
+  markup += renderViewInto("front", frontL, colA_x0, row2_y0, scale, true);
   markup += `<text x="${colB_x0}" y="${row2_y0 - 12}" font-family="IBM Plex Sans Condensed, sans-serif" font-weight="700" font-size="14" letter-spacing="0.06em" fill="#D9E1EC">RIGHT SIDE VIEW</text>`;
-  markup += right.markup;
+  markup += renderViewInto("right", rightL, colB_x0, row2_y0, scale, false);
 
   // Thin reference lines showing how the views align, like the classic
   // glass-box unfold — not structural, purely a visual aid.
