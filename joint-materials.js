@@ -111,13 +111,24 @@ const MATERIAL_TYPES = {
 
 const MATERIAL_GROUPS = ["Flat Stock", "Angle Iron", "Tube / Pipe", "C-Channel", "I-Beam", "Structural Steel"];
 
-// Derived views — every material gets all three automatically from
-// its cross-section + length. Nothing material-specific needed here.
-const PRINCIPAL_VIEWS = {
-  front: { label: "Front View", size: (mat, d) => ({ h: mat.crossSectionSize(d).h, w: d.length }) },
-  top:   { label: "Top View",   size: (mat, d) => ({ h: mat.crossSectionSize(d).w, w: d.length }) },
-  end:   { label: "End View",   size: (mat, d) => mat.crossSectionSize(d) }
+// Which global axis each member's LENGTH runs along, per joint type and
+// member role. This is what makes true third-angle projection possible:
+// a member whose length points along the axis a view is looking down
+// shows only its cross-section in that view (you can't see length when
+// looking straight down it) — e.g. a T-joint's upright member shows its
+// full height in Front/Right Side views, but only its cross-section in
+// Top view, since Top looks straight down the upright's length.
+const JOINT_MEMBER_AXES = {
+  tjoint:  { m1: "X", m2: "Y" },
+  butt:    { m1: "X", m2: "X" },
+  lap:     { m1: "X", m2: "X" },
+  corner:  { m1: "X", m2: "Y" },
+  edge:    { m1: "X", m2: "X" }
 };
+
+// Which axis is NOT visible (the viewing direction) in each principal view
+const VIEW_HIDDEN_AXIS = { front: "Z", top: "Y", right: "X" };
+const VIEW_LABELS = { front: "Front View", top: "Top View", right: "Right Side View" };
 
 const JOINT_ARRANGEMENTS = {
   tjoint:  { label: "T-Joint",   desc: "Member 2 stands perpendicular on top of Member 1, forming a T." },
